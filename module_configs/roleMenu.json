@@ -1,0 +1,11 @@
+{
+    "defaultType": "select",
+    "roleLimit": 3,
+    "emojis": ["🔴", "🟢", "🔵"],
+    "messages": {
+        "title": "Choose your role",
+        "noRoles": "No roles found to assign.",
+        "roleAdded": "You have been assigned the **{role}** role.",
+        "roleRemoved": "You have been removed from the **{role}** role."
+    }
+}
