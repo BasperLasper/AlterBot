@@ -23,6 +23,7 @@ const config = require(configPath);
 
 const bot = new Client({
   intents: [
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMessageReactions,
