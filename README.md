@@ -20,13 +20,16 @@ AlterBot is an **open-source, modular Discord bot** built using [Discord.js](htt
 
 ### 2. Install Dependencies
 
-```npm install
+```bash
+npm install
 ```
 ### 3. Configure the Bot
 
-Run the bot once to generate ```config.json```:
+Run the bot once to generate `config.json`:
 
-```node bot.js```
+```bash
+node bot.js
+```
 
 
 You'll see:
@@ -36,12 +39,13 @@ You'll see:
   "token": "",
   "clientId": "",
   "guildId": ""
-}```
+}
+```
 
 
 Edit the file and add your bot\'s credentials from the [Discord Developer Portal](https://discord.com/developers/applications).
 
-```
+```js
 | Field      | Description                                       |
 |------------|---------------------------------------------------|
 | token    | Your bot token                                     |
@@ -52,7 +56,9 @@ Edit the file and add your bot\'s credentials from the [Discord Developer Portal
 
 ## ✅ Running the Bot
 
-```node bot.js```
+```bash
+node bot.js
+```
 
 
 The bot will load modules from the modules/ folder, register slash commands, and log in.
@@ -64,8 +70,7 @@ The bot will load modules from the modules/ folder, register slash commands, and
 Modules go in `/modules` and support both **slash commands** and **event-based code**.
 
 ### 🔹 Slash Command Module
-```
-js
+```js
 // modules/ping.js
 const { SlashCommandBuilder } = require("discord.js");
 
@@ -81,8 +86,7 @@ module.exports = {
 
 
 ### 🔹 Event or Init Module
-```
-js
+```js
 // modules/onReady.js
 module.exports = {
   async init(bot) {
@@ -97,21 +101,22 @@ module.exports = {
 
 ## ⚙️ Example: Bot Status Command
 
-bash
+```bash
 /botstatus set type:Playing message:"Hello World" status:online
+```
 
 
 Or use scrolling statuses:
 
-bash
+```bash
 /botstatus scroll type:Watching messages:"Server 1,Server 2,Server 3" interval:10
-
+```
 
 To stop scrolling:
 
-bash
+```bash
 /botstatus stopscroll
-
+```
 
 ---
 
