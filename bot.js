@@ -58,7 +58,6 @@ rl.on('line', (input) => {
   const commands = [...bot.commands.values()].map(cmd => cmd.data.toJSON());
 
   const rest = new REST({ version: '10' }).setToken(config.token);
-
   try {
     console.log('🔄 Registering slash commands...');
 
@@ -79,7 +78,18 @@ rl.on('line', (input) => {
     console.error('❌ Error registering slash commands:', error);
   }
 
-  await bot.login(config.token);
+  try {
+    await bot.login(config.token);
+    console.log(`✅ Successfully logged in as ${bot.user.tag}`);
+  } catch (loginError) {
+    if (loginError.message.includes('An invalid token was provided')) {
+      console.error('❌ Failed to login: The bot token is invalid. Please check your token in config.json');
+    } else {
+      console.error('❌ Failed to login:', loginError);
+    }
+    process.exit(1);
+  }
+  
 })();
 
 // Global command interaction handler
