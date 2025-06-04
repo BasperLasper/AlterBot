@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const {
   SlashCommandBuilder,
   ActionRowBuilder,
@@ -9,6 +11,44 @@ const {
 
 module.exports = {
   run: async (bot) => {
+    // Setup data file path dynamically based on this file's name
+    const moduleFileName = path.basename(__filename, '.js');
+    const dataDir = path.resolve(__dirname, '../module_configs', 'data', moduleFileName);
+    const dataFile = path.join(dataDir, 'data.json');
+
+    // Ensure directories exist
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+    // Load persisted reaction menus from file
+    function loadReactionMenus() {
+      if (!fs.existsSync(dataFile)) return new Map();
+      try {
+        const raw = fs.readFileSync(dataFile, 'utf-8');
+        const obj = JSON.parse(raw);
+        return new Map(Object.entries(obj));
+      } catch (e) {
+        console.error('Failed to load reaction menus data:', e);
+        return new Map();
+      }
+    }
+
+    // Save current reaction menus to file
+    function saveReactionMenus(roleMenuReactions) {
+      const obj = {};
+      for (const [messageId, roleMap] of roleMenuReactions.entries()) {
+        obj[messageId] = roleMap;
+      }
+      try {
+        fs.writeFileSync(dataFile, JSON.stringify(obj, null, 2));
+      } catch (e) {
+        console.error('Failed to save reaction menus data:', e);
+      }
+    }
+
+    // Initialize the in-memory map with persisted data
+    bot.roleMenuReactions = loadReactionMenus();
+
+    // Register slash command 'createrolemenu'
     bot.commands.set('createrolemenu', {
       data: new SlashCommandBuilder()
         .setName('createrolemenu')
@@ -17,14 +57,14 @@ module.exports = {
       async execute(interaction) {
         await interaction.reply({ content: 'How many roles would you like to add? (1–10)', ephemeral: true });
 
-        const filter = m => m.author.id === interaction.user.id;
+        const filter = (m) => m.author.id === interaction.user.id;
         const msgCollector = interaction.channel.createMessageCollector({ filter, time: 60000 });
 
         const collectedRoles = [];
         let expectedCount = 0;
         let step = 'waiting_for_count';
 
-        msgCollector.on('collect', async msg => {
+        msgCollector.on('collect', async (msg) => {
           if (step === 'waiting_for_count') {
             const count = parseInt(msg.content);
             if (isNaN(count) || count < 1 || count > 10) {
@@ -44,7 +84,7 @@ module.exports = {
             }
 
             const role = msg.mentions.roles.first();
-            const emoji = match[2];
+            const emoji = match[2].trim();
 
             if (!role || !emoji) {
               return msg.reply('❌ Invalid input. Try again.');
@@ -75,7 +115,7 @@ module.exports = {
             const { roles, type } = bot.tempRoleMenuData;
             const title = msg.content;
 
-            // Delete user and bot setup messages
+            // Delete user and bot setup messages (last 100 messages)
             const messages = await interaction.channel.messages.fetch({ limit: 100 });
             const toDelete = messages.filter(m =>
               m.author.id === interaction.user.id || m.author.id === bot.user.id
@@ -120,10 +160,19 @@ module.exports = {
               const sent = await interaction.channel.send({ content: title });
               const roleMap = {};
               for (const r of roles) {
-                await sent.react(r.emoji);
+                try {
+                  await sent.react(r.emoji);
+                } catch {
+                  // fallback: try unicode emoji as string if custom emoji fails
+                  await sent.react(r.emoji);
+                }
                 roleMap[r.emoji] = r.role.id;
               }
               bot.roleMenuReactions.set(sent.id, roleMap);
+
+              // Save persistent data after creation
+              saveReactionMenus(bot.roleMenuReactions);
+
               await sent.pin();
               msgCollector.stop();
               return;
@@ -131,7 +180,7 @@ module.exports = {
           }
         });
 
-        msgCollector.on('end', collected => {
+        msgCollector.on('end', (collected) => {
           if (step !== 'waiting_for_title') {
             interaction.followUp({ content: '⏱ Setup timed out. Please try again.', ephemeral: true });
           }
@@ -140,7 +189,7 @@ module.exports = {
     });
 
     // Button handler
-    bot.on('interactionCreate', async interaction => {
+    bot.on('interactionCreate', async (interaction) => {
       if (interaction.isButton() && interaction.customId.startsWith('role:')) {
         const roleId = interaction.customId.split(':')[1];
         const role = interaction.guild.roles.cache.get(roleId);
@@ -191,7 +240,10 @@ module.exports = {
       const roleMap = bot.roleMenuReactions?.get(reaction.message.id);
       if (!roleMap) return;
 
-      const roleId = roleMap[reaction.emoji.name];
+      // Discord.js sometimes uses custom emojis as an object or string, normalize:
+      const emojiKey = reaction.emoji.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : reaction.emoji.name;
+
+      const roleId = roleMap[emojiKey] ?? roleMap[reaction.emoji.name];
       if (roleId) {
         const member = await reaction.message.guild.members.fetch(user.id);
         await member.roles.add(roleId).catch(console.error);
@@ -204,7 +256,9 @@ module.exports = {
       const roleMap = bot.roleMenuReactions?.get(reaction.message.id);
       if (!roleMap) return;
 
-      const roleId = roleMap[reaction.emoji.name];
+      const emojiKey = reaction.emoji.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : reaction.emoji.name;
+
+      const roleId = roleMap[emojiKey] ?? roleMap[reaction.emoji.name];
       if (roleId) {
         const member = await reaction.message.guild.members.fetch(user.id);
         await member.roles.remove(roleId).catch(console.error);
