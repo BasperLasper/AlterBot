@@ -6,7 +6,7 @@ AlterBot is an **open-source, modular Discord bot** built using [Discord.js](htt
 
 ## 🔧 Features
 
-- 🔌 Modular command system (\`/modules\`)
+- 🔌 Modular command system (/modules)
 - 💬 Slash command support
 - 🧠 Interactive and admin-only features (like bot status control)
 - 📂 Auto-generated config on first run
@@ -20,55 +20,52 @@ AlterBot is an **open-source, modular Discord bot** built using [Discord.js](htt
 
 ### 2. Install Dependencies
 
-\`\`\`bash
-npm install
-\`\`\`
-
+```npm install
+```
 ### 3. Configure the Bot
 
-Run the bot once to generate \`config.json\`:
+Run the bot once to generate ```config.json```:
 
-\`\`\`bash
-node bot.js
-\`\`\`
+```node bot.js```
 
-You\'ll see:
 
-\`\`\`json
+You'll see:
+
+```json
 {
   "token": "",
   "clientId": "",
   "guildId": ""
-}
-\`\`\`
+}```
+
 
 Edit the file and add your bot\'s credentials from the [Discord Developer Portal](https://discord.com/developers/applications).
 
+```
 | Field      | Description                                       |
 |------------|---------------------------------------------------|
-| \`token\`    | Your bot token                                     |
-| \`clientId\` | The Application (Client) ID                        |
-| \`guildId\`  | (Optional) Test server ID for faster dev commands  |
+| token    | Your bot token                                     |
+| clientId | The Application (Client) ID                        |
+| guildId  | (Optional) Test server ID for faster dev commands  |```
 
 ---
 
 ## ✅ Running the Bot
 
-\`\`\`bash
-node bot.js
-\`\`\`
+```node bot.js```
 
-The bot will load modules from the \`modules/\` folder, register slash commands, and log in.
+
+The bot will load modules from the modules/ folder, register slash commands, and log in.
 
 ---
 
 ## 🧱 Creating a Module
 
-Modules go in \`/modules\` and support both **slash commands** and **event-based code**.
+Modules go in `/modules` and support both **slash commands** and **event-based code**.
 
 ### 🔹 Slash Command Module
-
-\`\`\`js
+```
+js
 // modules/ping.js
 const { SlashCommandBuilder } = require("discord.js");
 
@@ -80,41 +77,41 @@ module.exports = {
   async execute(interaction) {
     await interaction.reply("🏓 Pong!");
   },
-};
-\`\`\`
+};```
+
 
 ### 🔹 Event or Init Module
-
-\`\`\`js
+```
+js
 // modules/onReady.js
 module.exports = {
   async init(bot) {
     bot.once("ready", () => {
-      console.log(\`✅ Bot is ready as \${bot.user.tag}\`);
+      console.log(✅ Bot is ready as \${bot.user.tag});
     });
   },
 };
-\`\`\`
+```
 
 ---
 
 ## ⚙️ Example: Bot Status Command
 
-\`\`\`bash
+bash
 /botstatus set type:Playing message:"Hello World" status:online
-\`\`\`
+
 
 Or use scrolling statuses:
 
-\`\`\`bash
+bash
 /botstatus scroll type:Watching messages:"Server 1,Server 2,Server 3" interval:10
-\`\`\`
+
 
 To stop scrolling:
 
-\`\`\`bash
+bash
 /botstatus stopscroll
-\`\`\`
+
 
 ---
 
@@ -122,9 +119,9 @@ To stop scrolling:
 
 Pull requests are welcome! To contribute:
 
-- Add new features as modules in \`/modules\`
-- Use \`SlashCommandBuilder\` for commands
-- Use \`.init()\` for background/event logic
+- Add new features as modules in /modules
+- Use SlashCommandBuilder for commands
+- Use .init() for background/event logic
 - Follow the existing file structure and code style
 
 ---
