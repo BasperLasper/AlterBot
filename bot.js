@@ -33,7 +33,6 @@ const bot = new Client({
 
 bot.commands = new Collection();
 bot.modules = new Collection();
-
 bot.roleMenuReactions = new Map();
 
 const rl = readline.createInterface({
@@ -43,7 +42,6 @@ const rl = readline.createInterface({
 
 rl.on('line', (input) => {
   const command = input.trim().toLowerCase();
-
   if (command === 'stop') {
     console.log('Stopping bot...');
     process.exit(0);
@@ -51,31 +49,29 @@ rl.on('line', (input) => {
 });
 
 (async () => {
-  // Load all modules (like roleMenu.js)
   await loadModules(bot);
 
-  // Prepare slash command data
   const commands = [...bot.commands.values()].map(cmd => cmd.data.toJSON());
-
   const rest = new REST({ version: '10' }).setToken(config.token);
+
   try {
     console.log('🔄 Registering slash commands...');
 
-    // GLOBAL COMMANDS (slower to update)
+    // GLOBAL COMMANDS (slow to update)
     await rest.put(
       Routes.applicationCommands(config.clientId),
       { body: commands }
     );
 
-    // FOR FASTER TESTING (uncomment to register only in 1 server):
-    // await rest.put(
-    //     Routes.applicationGuildCommands(config.clientId, config.guildId),
-    //     { body: commands }
-    // );
 
     console.log('✅ Slash commands registered.');
   } catch (error) {
-    console.error('❌ Error registering slash commands:', error);
+    if (error.code === 20012) {
+      console.error('❌ Error: You are not authorized to perform this action. This likely means the `clientId` in config.json is incorrect or does not match the bot token.');
+    } else {
+      console.error('❌ Error registering slash commands:', error);
+    }
+    process.exit(1);
   }
 
   try {
@@ -89,7 +85,6 @@ rl.on('line', (input) => {
     }
     process.exit(1);
   }
-  
 })();
 
 // Global command interaction handler
@@ -102,7 +97,10 @@ bot.on('interactionCreate', async interaction => {
       await command.execute(interaction);
     } catch (error) {
       console.error(error);
-      await interaction.reply({ content: '❌ There was an error executing this command.', ephemeral: true });
+      await interaction.reply({
+        content: '❌ There was an error executing this command.',
+        ephemeral: true
+      });
     }
   }
 });
