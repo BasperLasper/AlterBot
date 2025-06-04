@@ -63,7 +63,6 @@ rl.on('line', (input) => {
       { body: commands }
     );
 
-
     console.log('✅ Slash commands registered.');
   } catch (error) {
     if (error.code === 20012) {
