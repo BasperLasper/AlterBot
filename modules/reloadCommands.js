@@ -5,7 +5,6 @@ module.exports = {
     run: async bot => {
         bot.on('messageCreate', async message => {
             if (!message.content.startsWith('-reloadcommands')) return;
-            message.send("lol")
             if (!message.member.permissions.has('Administrator')) return; // optional security check
 
             const commands = [...bot.commands.values()].map(cmd => cmd.data.toJSON());
