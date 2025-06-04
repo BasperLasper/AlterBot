@@ -7,6 +7,7 @@ function loadConfig(filePath, defaultData) {
     saveConfig(filePath, defaultData);
     return defaultData;
   }
+  delete require.cache[require.resolve(filePath)];
   return require(filePath);
 }
 
