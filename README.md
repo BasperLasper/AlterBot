@@ -50,7 +50,8 @@ Edit the file and add your bot\'s credentials from the [Discord Developer Portal
 |------------|---------------------------------------------------|
 | token    | Your bot token                                     |
 | clientId | The Application (Client) ID                        |
-| guildId  | (Optional) Test server ID for faster dev commands  |```
+| guildId  | (Optional) Test server ID for faster dev commands  |
+```
 
 ---
 
