@@ -1,18 +1,15 @@
 const fs = require('fs');
 const path = require('path');
+const YAML = require('yamljs');
 
-function loadConfig(filePath, defaultData) {
+function initConfig(filePath, defaultConfig = {}) {
   if (!fs.existsSync(filePath)) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    saveConfig(filePath, defaultData);
-    return defaultData;
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    fs.writeFileSync(filePath, YAML.stringify(defaultConfig, 4));
   }
-  delete require.cache[require.resolve(filePath)];
-  return require(filePath);
+  return YAML.load(filePath);
 }
 
-function saveConfig(filePath, data) {
-  fs.writeFileSync(filePath, `module.exports = ${JSON.stringify(data, null, 2)};\n`);
-}
-
-module.exports = { loadConfig, saveConfig };
+module.exports = { initConfig };

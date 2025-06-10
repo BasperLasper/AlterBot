@@ -6,13 +6,8 @@ const readline = require('readline');
 
 const configPath = path.resolve(__dirname, 'config.json');
 
-// Auto-create config.json if missing
 if (!fs.existsSync(configPath)) {
-  const defaultConfig = {
-    token: '',
-    clientId: '',
-    guildId: ''
-  };
+  const defaultConfig = { token: '', clientId: '', guildId: '' };
   fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
   console.log('config.json not found. Created default config.json. Please fill it in and restart the bot.');
   process.exit(0);
@@ -50,13 +45,21 @@ rl.on('line', (input) => {
 (async () => {
   await loadModules(bot);
 
-  // Prepare commands for registration
-  const commands = [...bot.commands.values()].map(cmd => cmd.data.toJSON());
+  // Avoid duplicate command registration
+  const registered = new Set();
+  const commands = [];
+
+  for (const cmd of bot.commands.values()) {
+    if (cmd.data && !registered.has(cmd.data.name)) {
+      commands.push(cmd.data.toJSON());
+      registered.add(cmd.data.name);
+    }
+  }
+
   const rest = new REST({ version: '10' }).setToken(config.token);
 
   try {
     console.log('🔄 Registering slash commands...');
-    // Register globally (slow update) or use Routes.applicationGuildCommands(config.clientId, config.guildId) for guild-only
     await rest.put(
       Routes.applicationCommands(config.clientId),
       { body: commands }
@@ -100,10 +103,9 @@ bot.on('interactionCreate', async interaction => {
   }
 });
 
-// Handle select menu and other interactions forwarded to modules
+// Handle select menu and other forwarded interactions
 bot.on('interactionCreate', async interaction => {
   if (interaction.isStringSelectMenu()) {
-    // Loop through all commands/modules with a handle() function
     for (const cmd of bot.commands.values()) {
       if (typeof cmd.handle === 'function') {
         try {
@@ -111,10 +113,37 @@ bot.on('interactionCreate', async interaction => {
         } catch (error) {
           console.error('Error handling interaction:', error);
           if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: '❌ An error occurred.', ephemeral: true });
+            //await interaction.reply({ content: '❌ An error occurred.', ephemeral: true });
           }
         }
       }
+    }
+  }
+});
+
+// Support dash-based commands like -new
+bot.on('messageCreate', async message => {
+  if (message.author.bot || !message.content.startsWith('-')) return;
+
+  const args = message.content.slice(1).trim().split(/ +/);
+  const commandName = args.shift().toLowerCase();
+  const command = bot.commands.get(commandName);
+
+  if (command && typeof command.execute === 'function') {
+    try {
+      await command.execute({
+        user: message.author,
+        guild: message.guild,
+        channel: message.channel,
+        reply: msg => message.reply(msg),
+        deferReply: () => Promise.resolve(),
+        editReply: msg => message.channel.send(msg),
+        member: message.member,
+        content: message.content
+      }, bot);
+    } catch (error) {
+      console.error(error);
+      message.reply('❌ Error executing command.');
     }
   }
 });

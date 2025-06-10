@@ -1,0 +1,4 @@
+prefix: '!'
+claimRole: null
+command: claimrole
+setClaimRoleCommand: setclaimrole
