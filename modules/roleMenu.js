@@ -13,7 +13,7 @@ module.exports = {
   run: async (bot) => {
     // Setup data file path dynamically based on this file's name
     const moduleFileName = path.basename(__filename, '.js');
-    const dataDir = path.resolve(__dirname, '../module_configs', 'data', moduleFileName);
+    const dataDir = path.resolve(__dirname, '../modules_configs', 'data', moduleFileName);
     const dataFile = path.join(dataDir, 'data.json');
 
     // Ensure directories exist

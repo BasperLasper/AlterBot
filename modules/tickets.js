@@ -1,66 +1,142 @@
-// 📁 modules/tickets.js
 const fs = require('fs');
 const path = require('path');
-const { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+const axios = require('axios');
+const FormData = require('form-data');
+const {
+  SlashCommandBuilder,
+  ChannelType,
+  PermissionFlagsBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder
+} = require('discord.js');
+const discordTranscripts = require('discord-html-transcripts');
 
 const CONFIG_DIR = path.join(__dirname, '..', 'modules_configs', 'Tickets');
 const DATA_DIR = path.join(CONFIG_DIR, 'Data');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+const COUNTER_FILE = path.join(DATA_DIR, 'ticket_counter.json');
 
-// Create config directories/files
 if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
 if (!fs.existsSync(CONFIG_FILE)) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify({
-    categories: {
-      "Minecraft Issues": {
-        categoryId: null,
-        children: {
-          "Server Related": {
-            categoryId: null,
-            children: {
-              "Hub": { categoryId: null, questions: ["What issue are you experiencing in Hub?"] },
-              "Prison": { categoryId: null, questions: ["What issue are you experiencing in Prison?"] },
-              "Skyblock": { categoryId: null, questions: ["What issue are you experiencing in Skyblock?"] }
-            }
+    "categories": {
+      "Pocket Edition": {
+        "categoryId": null,
+        "staffRoleIds": ["1234567890"],
+        "questions": ["What's your issue?"]
+      },
+      "Java": {
+        "categoryId": null,
+        "staffRoleIds": ["1234567890"],
+        "children": {
+          "Hub": {
+            "categoryId": null,
+            "staffRoleIds": ["1234567890"],
+            "questions": ["What's your issue?"]
           },
-          "Client Related": {
-            categoryId: null,
-            questions: ["What client are you using?", "What mods are installed?"]
+          "Factions": {
+            "categoryId": null,
+            "staffRoleIds": ["1234567890"],
+            "questions": [
+              "What's your username?",
+              "What's the issue?"
+            ]
           }
         }
       }
     },
-    waitingCategoryId: null
-  }, null, 2));
-  console.log("📝 Created default Tickets config.");
+    "waitingCategoryId": null,
+    "transcripts": {
+      "enabled": true,
+      "channelId": null,
+      "dmCreator": true,
+      "dmCloser": true,
+      "commandsEnabled": true,
+      "uploadURL": null,
+      "uploadURLPrefix": "https://yourdomain.com/transcripts/",
+      "closingRoles": [],
+      "mentionRoles": []
+    }
+  }
+  , null, 2));
 }
+if (!fs.existsSync(COUNTER_FILE)) fs.writeFileSync(COUNTER_FILE, JSON.stringify({ last: 0 }, null, 2));
 
 const config = require(CONFIG_FILE);
+
+function getNextTicketName() {
+  const counter = JSON.parse(fs.readFileSync(COUNTER_FILE));
+  counter.last += 1;
+  fs.writeFileSync(COUNTER_FILE, JSON.stringify(counter, null, 2));
+  return `ticket-${String(counter.last).padStart(4, '0')}`;
+}
+
+function findStaffRoleIds(categories, path = []) {
+  if (!path.length) return [];
+  let node = categories[path[0]];
+  if (!node) return [];
+
+  for (let i = 1; i < path.length; i++) {
+    node = node.children?.[path[i]];
+    if (!node) break;
+  }
+
+  for (let i = path.length; i >= 1; i--) {
+    let checkNode = categories[path[0]];
+    for (let j = 1; j < i; j++) {
+      checkNode = checkNode?.children?.[path[j]];
+    }
+    if (Array.isArray(checkNode?.staffRoleIds)) return checkNode.staffRoleIds;
+  }
+
+  return [];
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('new')
     .setDescription('Create a new support ticket.'),
-  aliases: ['-new'],
+  aliases: ['-new', 'transcript', '-transcript', 'close', '-close'],
 
   async execute(interaction, bot) {
+    const isSlash = interaction.isChatInputCommand?.();
+    const cmd = isSlash ? interaction.commandName : interaction.content?.split(' ')[0]?.slice(1);
+
+    if (config.transcripts?.commandsEnabled && ['transcript', '-transcript'].includes(cmd)) {
+      return await handleTranscriptCommand(interaction);
+    }
+
+    if (['close', '-close'].includes(cmd)) {
+      return await handleCloseCommand(interaction);
+    }
+
     await interaction.deferReply({ flags: 64 });
 
-    const ticketNumber = Date.now();
-    const channelName = `ticket-${ticketNumber}`;
+    const channelName = getNextTicketName();
     const guild = interaction.guild;
     const member = interaction.member;
+
+    const overwrites = [
+      { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+    ];
+    const staffRoleIds = config.categories?.["Minecraft Issues"]?.staffRoleIds ?? [];
+    for (const roleId of staffRoleIds) {
+      overwrites.push({
+        id: roleId,
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+      });
+    }
 
     const channel = await guild.channels.create({
       name: channelName,
       type: ChannelType.GuildText,
       parent: config.waitingCategoryId ?? null,
-      permissionOverwrites: [
-        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
-      ]
+      permissionOverwrites: overwrites
     });
 
     await interaction.editReply(`🎟 Ticket created: ${channel}`);
@@ -68,50 +144,259 @@ module.exports = {
   },
 
   async handle(interaction, bot) {
-    if (!interaction.isStringSelectMenu()) return;
+    if (!interaction.isStringSelectMenu() && !interaction.isButton()) return;
 
-    const [type, ticketId] = interaction.customId.split(':');
-    if (!interaction.channel || !interaction.guild) return;
-
+    const [type, ticketId, creatorId] = interaction.customId.split(':');
     const statePath = path.join(DATA_DIR, `${interaction.channel.id}.json`);
-    let state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath)) : null;
+    const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath)) : null;
+    if (!state) return;
 
-    const selected = interaction.values[0];
-    let selectedData = state.current[selected] ?? state.current.children?.[selected];
+    const userId = interaction.user.id;
+    const isCloser = userId === creatorId || interaction.member.roles.cache.some(r => config.transcripts?.closingRoles?.includes(r.id));
 
-    if (selectedData) {
-      if (selectedData.children) {
-        state.current = selectedData;
-        fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-        return showSelectMenu(interaction.channel, 'category', Object.keys(selectedData.children), 'Choose a sub-category:');
+    if (interaction.isButton()) {
+      if (type === 'close') {
+        if (!isCloser) return interaction.reply({ content: '❌ You do not have permission to close this ticket.', ephemeral: true });
+
+        const confirm = new ButtonBuilder().setCustomId(`confirm:${ticketId}:${creatorId}`).setLabel('✅ Confirm Close').setStyle(ButtonStyle.Danger);
+        const cancel = new ButtonBuilder().setCustomId(`cancel:${ticketId}:${creatorId}`).setLabel('❎ Cancel').setStyle(ButtonStyle.Secondary);
+        const row = new ActionRowBuilder().addComponents(confirm, cancel);
+
+        return await interaction.reply({ content: '⚠️ Are you sure you want to close this ticket?', components: [row], ephemeral: true });
       }
 
-      if (selectedData.questions) {
-        state.current = selectedData;
-        state.questions = selectedData.questions;
-        state.answers = [];
-        fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-        return askQuestions(interaction.channel, interaction.user, state);
+      if (type === 'confirm') {
+        if (!isCloser) return;
+        await interaction.deferUpdate();
+        await handleClose(interaction.channel, creatorId, userId, interaction.member);
+        return;
+      }
+
+      if (type === 'cancel') {
+        if (!isCloser) return;
+        await interaction.reply({ content: '✅ Ticket closure cancelled.', ephemeral: true });
+        return;
       }
     }
-    await interaction.reply({ content: '❌ Invalid selection. Please try again.', ephemeral: true });
+
+    // Select Menu Handler
+    if (!interaction.values?.length) return;
+
+    const selected = interaction.values[0];
+    if (type === 'category') {
+      const branch = state.current.children?.[selected];
+      if (!branch) return;
+
+      state.current = branch;
+      state.path = [...(state.path || []), selected];
+      fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+      const embed = buildSummaryEmbed(state.path, state.answers);
+      const messages = await interaction.channel.messages.fetch({ limit: 10 });
+      const botMsg = messages.filter(m => m.author.id === interaction.client.user.id && m.embeds.length).first();
+      if (botMsg) await botMsg.edit({ embeds: [embed] });
+
+      await interaction.message.delete().catch(() => {});
+      if (branch.children) {
+        return await showSelectMenu(interaction.channel, `category:${interaction.channel.id}:${interaction.user.id}`, Object.keys(branch.children), 'Choose a sub-category:');
+      }
+
+      if (branch.questions) {
+        state.questions = branch.questions;
+        state.answers = [];
+        fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+        return await askQuestions(interaction.channel, interaction.user, state);
+      }
+    }
   }
 };
 
-async function handleCategorySelection(bot, channel, member, tree) {
-  const state = {
-    current: tree,
-    questions: [],
-    answers: []
-  };
+async function handleClose(channel, creatorId, closerId, closerMember) {
+  const statePath = path.join(DATA_DIR, `${channel.id}.json`);
+  const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath)) : null;
+  if (!state) return;
 
-  fs.writeFileSync(path.join(DATA_DIR, `${channel.id}.json`), JSON.stringify(state, null, 2));
-  await showSelectMenu(channel, 'category', Object.keys(tree), 'Choose a category:');
+  try {
+    if (state.current.categoryId) await channel.setParent(state.current.categoryId);
+  } catch {}
+
+  const staffRoleIds = findStaffRoleIds(config.categories, state.path);
+  for (const roleId of staffRoleIds) {
+    try {
+      await channel.permissionOverwrites.edit(roleId, { ViewChannel: true, SendMessages: true });
+    } catch {}
+  }
+
+  if (config.transcripts?.enabled) {
+    const transcript = await discordTranscripts.createTranscript(channel, {
+      limit: -1,
+      returnType: 'attachment',
+      fileName: `${channel.name}.html`,
+      poweredBy: false,
+      preamble: {
+        content: `📋 Transcript from **${channel.guild.name}**`,
+        embeds: [
+          {
+            title: `Server: ${channel.guild.name}`,
+            thumbnail: {
+              url: channel.guild.iconURL({ extension: 'png', size: 256 })
+            },
+            description: `Transcript for ticket **${channel.name}**`,
+            color: 0x5865f2,
+            timestamp: new Date().toISOString()
+          }
+        ]
+      }
+    });
+    
+
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const closerMention = `<@${closerId}>`;
+    const closerRole = closerMember.roles.cache.find(r => config.transcripts?.mentionRoles?.includes(r.id));
+    const roleLine = closerRole ? ` (${closerRole.name})` : '';
+
+    const transcriptChannel = config.transcripts.channelId ? await channel.guild.channels.fetch(config.transcripts.channelId).catch(() => null) : null;
+    let transcriptUrl = null;
+
+    if (config.transcripts.uploadURL) {
+      try {
+        const form = new FormData();
+        form.append('file', transcript.attachment, transcript.name);
+        form.append('channel_id', channel.id);
+
+        const res = await axios.post(config.transcripts.uploadURL, form, { headers: form.getHeaders() });
+        if (res.data?.filename && config.transcripts.uploadURLPrefix) {
+          const safePrefix = config.transcripts.uploadURLPrefix.replace(/\/$/, ''); // removes trailing slash if present
+          transcriptUrl = `${safePrefix}/${res.data.filename}`;
+        }
+        
+              } catch (e) {
+        console.warn('Transcript upload failed. Falling back to Discord upload.');
+      }
+    }
+
+    if (transcriptChannel?.isTextBased()) {
+      const messageContent = [
+        `🗃️ **Ticket Closed**: <#${channel.id}>`,
+        `👤 Creator: <@${creatorId}>`,
+        `🔒 Closed by: ${closerMention}${roleLine}`,
+        `🕒 <t:${nowUnix}:F>`,
+        transcriptUrl ? `📄 Transcript: ${transcriptUrl}` : null
+      ].filter(Boolean).join('\n');
+
+      await transcriptChannel.send({
+        content: messageContent,
+        files: transcriptUrl ? [] : [transcript]
+      });
+    }
+
+    if (config.transcripts.dmCreator && closerId !== creatorId) {
+      const creator = await channel.guild.members.fetch(creatorId).catch(() => null);
+      if (creator?.send) {
+        const message = transcriptUrl ? transcriptUrl : { files: [transcript] };
+        await creator.send({ content: `📁 Transcript for your ticket in ${channel.guild.name}`, ...message }).catch(() => {});
+      }
+    }
+
+    if (config.transcripts.dmCloser) {
+      const closer = await channel.guild.members.fetch(closerId).catch(() => null);
+      if (closer?.send) {
+        const message = transcriptUrl ? transcriptUrl : { files: [transcript] };
+        await closer.send({ content: `📁 Transcript for closed ticket in ${channel.guild.name}`, ...message }).catch(() => {});
+      }
+    }
+  }
+
+  await channel.delete().catch(() => {});
 }
 
-async function showSelectMenu(channel, id, options, placeholder) {
+async function handleCloseCommand(interaction) {
+  const channel = interaction.channel;
+  if (!channel.name?.startsWith('ticket-')) {
+    return await interaction.reply({ content: '❌ This is not a ticket channel.', ephemeral: true });
+  }
+
+  const statePath = path.join(DATA_DIR, `${channel.id}.json`);
+  const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath)) : null;
+  if (!state) return;
+
+  const isCloser = interaction.user.id === state.creatorId ||
+    interaction.member.roles.cache.some(r => config.transcripts?.closingRoles?.includes(r.id));
+
+  if (!isCloser) {
+    return await interaction.reply({ content: '❌ You do not have permission to close this ticket.', ephemeral: true });
+  }
+
+  return await handleClose(channel, state.creatorId, interaction.user.id, interaction.member);
+}
+
+async function handleTranscriptCommand(interaction) {
+  const target = interaction.options?.getChannel?.('channel') || interaction.mentions?.channels?.first() || interaction.channel;
+  if (!target?.name?.startsWith('ticket-')) {
+    return await interaction.reply({ content: '❌ This is not a valid ticket channel.', ephemeral: true });
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const transcript = await discordTranscripts.createTranscript(target, {
+    limit: -1,
+    returnType: 'attachment',
+    fileName: `${target.name}.html`,
+    poweredBy: false
+  });
+
+  // Try upload
+  let transcriptUrl = null;
+  if (config.transcripts?.uploadURL) {
+    try {
+      const form = new FormData();
+      form.append('file', transcript.attachment, transcript.name);
+      form.append('channel_id', target.id);
+
+      const res = await axios.post(config.transcripts.uploadURL, form, {
+        headers: form.getHeaders()
+      });
+      if (res.data?.url) {
+        transcriptUrl = `${config.transcripts.publicURLPrefix.replace(/\/$/, '')}/${res.data.url.replace(/^\//, '')}`;
+      }
+          } catch (err) {
+      console.warn('Transcript upload failed in -transcript command:', err.message);
+    }
+  }
+
+  // Send result
+  if (transcriptUrl) {
+    return await interaction.editReply({
+      content: `📎 Transcript uploaded: ${transcriptUrl}`
+    });
+  } else {
+    return await interaction.editReply({
+      content: `📎 Transcript generated:`,
+      files: [transcript]
+    });
+  }
+}
+
+
+async function handleCategorySelection(bot, channel, member, tree) {
+  const state = {
+    current: { children: tree },
+    path: [],
+    questions: [],
+    answers: [],
+    creatorId: member.id
+  };
+
+  const statePath = path.join(DATA_DIR, `${channel.id}.json`);
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+  await channel.send({ embeds: [buildSummaryEmbed([])] });
+  await showSelectMenu(channel, `category:${channel.id}:${member.id}`, Object.keys(tree), 'Choose a category:');
+}
+
+async function showSelectMenu(channel, customId, options, placeholder) {
   const menu = new StringSelectMenuBuilder()
-    .setCustomId(`${id}:${channel.id}`)
+    .setCustomId(customId)
     .setPlaceholder(placeholder)
     .addOptions(options.map(opt => ({ label: opt, value: opt })));
 
@@ -119,18 +404,27 @@ async function showSelectMenu(channel, id, options, placeholder) {
   await channel.send({ content: placeholder, components: [row] });
 }
 
+function buildSummaryEmbed(pathArray, answers = []) {
+  const embed = new EmbedBuilder()
+    .setTitle('📝 Ticket Summary')
+    .setColor(0x00AE86)
+    .setTimestamp();
+
+  const description = pathArray.map((p, i) => `${'➤'.repeat(i + 1)} ${p}`).join('\n');
+  if (description.length > 0) embed.setDescription(description);
+  for (const a of answers) embed.addFields({ name: a.question, value: a.answer });
+
+  return embed;
+}
+
 async function askQuestions(channel, user, state) {
   const statePath = path.join(DATA_DIR, `${channel.id}.json`);
+  const messages = await channel.messages.fetch({ limit: 10 });
+  const embedMsg = messages.find(m => m.author.id === channel.client.user.id && m.embeds.length);
 
   for (const question of state.questions) {
     const qMsg = await channel.send(`<@${user.id}> ❓ ${question}`);
-    const collected = await channel.awaitMessages({
-      filter: m => m.author.id === user.id,
-      max: 1,
-      time: 120000,
-      errors: ['time']
-    }).catch(() => null);
-
+    const collected = await channel.awaitMessages({ filter: m => m.author.id === user.id, max: 1, time: 120000 }).catch(() => null);
     if (!collected) {
       await channel.send('⏱️ Ticket timed out.');
       return;
@@ -141,38 +435,31 @@ async function askQuestions(channel, user, state) {
     await qMsg.delete();
     await answer.delete();
     fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+    if (embedMsg) await embedMsg.edit({ embeds: [buildSummaryEmbed(state.path, state.answers)] });
   }
 
   await finalizeTicket(channel, user, state);
 }
 
 async function finalizeTicket(channel, user, state) {
-  const embedChunks = [];
-  let current = new EmbedBuilder()
-    .setTitle('📝 Ticket Summary')
-    .setColor(0x3498db)
-    .setTimestamp();
-
-  let fieldCount = 0;
-  for (const qa of state.answers) {
-    current.addFields({ name: qa.question, value: qa.answer });
-    fieldCount++;
-    if (fieldCount >= 5) {
-      embedChunks.push(current);
-      current = new EmbedBuilder().setColor(0x3498db);
-      fieldCount = 0;
-    }
-  }
-  if (fieldCount > 0) embedChunks.push(current);
-
-  for (const embed of embedChunks) {
-    await channel.send({ embeds: [embed] });
-  }
-
   try {
     const finalCategoryId = state.current.categoryId;
     if (finalCategoryId) await channel.setParent(finalCategoryId);
-  } catch (e) {
-    console.warn('Category move skipped or failed:', e.message);
+  } catch {}
+
+  const staffRoleIds = findStaffRoleIds(config.categories, state.path);
+  for (const roleId of staffRoleIds) {
+    try {
+      await channel.permissionOverwrites.edit(roleId, { ViewChannel: true, SendMessages: true });
+    } catch {}
   }
+
+  const closeButton = new ButtonBuilder()
+    .setCustomId(`close:${channel.id}:${user.id}`)
+    .setLabel('Close Ticket')
+    .setStyle(ButtonStyle.Danger);
+
+  const row = new ActionRowBuilder().addComponents(closeButton);
+  await channel.send({ content: staffRoleIds.map(id => `<@&${id}>`).join(' ') + ' ✅ Ticket completed.', components: [row] });
 }
