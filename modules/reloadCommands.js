@@ -1,19 +1,25 @@
-const { REST, Routes } = require('discord.js');
+const { REST, Routes, PermissionsBitField } = require('discord.js');
 const config = require('../config.json');
 
 module.exports = {
     run: async bot => {
         bot.on('messageCreate', async message => {
             if (!message.content.startsWith('-reloadcommands')) return;
-            if (!message.member.permissions.has('Administrator')) return; // optional security check
+            if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
-            const commands = [...bot.commands.values()].map(cmd => cmd.data.toJSON());
+            const commands = Array.from(
+                new Map(
+                    [...bot.commands.values()]
+                        .filter(cmd => cmd?.data && typeof cmd.data.toJSON === 'function')
+                        .map(cmd => [cmd.data.name, cmd.data.toJSON()])
+                ).values()
+            );
+
             const rest = new REST({ version: '10' }).setToken(config.token);
 
             try {
                 await rest.put(
-                    Routes.applicationGuildCommands(config.clientId, config.guildId), // for testing
-                    // Routes.applicationCommands(config.clientId), // use this for global
+                    Routes.applicationGuildCommands(config.clientId, config.guildId),
                     { body: commands }
                 );
 

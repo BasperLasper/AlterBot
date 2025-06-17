@@ -19,26 +19,43 @@ async function loadModules(bot) {
       console.log(`📦 Importing module: ${file}`);
       const mod = require(fullPath);
 
-      // Slash or message-based command
-      if (mod.data && typeof mod.execute === 'function') {
-        bot.commands.set(mod.data.name, mod);
-        if (Array.isArray(mod.aliases)) {
-          for (const alias of mod.aliases) {
-            if (bot.commands.has(alias)) {
-              console.warn(`⚠️ Alias conflict: '${alias}' skipped.`);
-              continue;
-            }
-            bot.commands.set(alias, mod);
-          }
+      // Multi-command support
+      if (Array.isArray(mod.commands)) {
+        for (const cmd of mod.commands) {
+          if (!cmd?.name || typeof mod.execute !== 'function') continue;
+
+          bot.commands.set(cmd.name, {
+            ...mod,
+            data: cmd
+          });
+
+          console.log(`✅ Slash command loaded: ${cmd.name}`);
         }
-        console.log(`✅ Command loaded: ${mod.data.name}`);
       }
 
-      // Module logic (like messageCreate listener)
+      // Single slash command support
+      else if (mod.data && typeof mod.execute === 'function') {
+        bot.commands.set(mod.data.name, mod);
+        console.log(`✅ Slash command loaded: ${mod.data.name}`);
+      }
+
+      // Aliases (only once, not per subcommand)
+      if (Array.isArray(mod.aliases)) {
+        for (const alias of mod.aliases) {
+          if (bot.commands.has(alias)) {
+            console.warn(`⚠️ Alias conflict: '${alias}' skipped.`);
+            continue;
+          }
+          bot.commands.set(alias, mod);
+        }
+      }
+
+      // Module logic (e.g. listeners)
       if (typeof mod.run === 'function') {
         await mod.run(bot);
         console.log(`🛠️  Module logic run: ${file}`);
       }
+
     } catch (err) {
       console.error(`❌ Failed to load module ${file}:`, err);
     }

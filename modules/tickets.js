@@ -101,14 +101,65 @@ function findStaffRoleIds(categories, path = []) {
 
   return [];
 }
+async function resolveMember(guild, input) {
+  if (!guild || !input) return null;
+
+  // Clean up input (e.g., <@123> => 123)
+  const idMatch = input.match(/^<@!?(\d+)>$/);
+  const rawInput = idMatch ? idMatch[1] : input.trim();
+
+  // Try by ID first
+  try {
+    const memberById = await guild.members.fetch({ user: rawInput, cache: true }).catch(() => null);
+    if (memberById) return memberById;
+  } catch {}
+
+  const lower = rawInput.toLowerCase();
+
+  // Try cache lookup by username, display name or tag
+  const cached = guild.members.cache.find(m =>
+    m.user.username.toLowerCase() === lower ||
+    m.displayName?.toLowerCase() === lower ||
+    `${m.user.username.toLowerCase()}#${m.user.discriminator}` === lower
+  );
+  if (cached) return cached;
+
+  // Fallback: fetch all members and try again
+  try {
+    const fetchedMembers = await guild.members.fetch({ query: rawInput, limit: 10 });
+    return fetchedMembers.find(m =>
+      m.user.username.toLowerCase() === lower ||
+      m.displayName?.toLowerCase() === lower ||
+      `${m.user.username.toLowerCase()}#${m.user.discriminator}` === lower
+    ) || null;
+  } catch {
+    return null;
+  }
+}
+
 
 module.exports = {
-  data: new SlashCommandBuilder()
+  commands: [
+    new SlashCommandBuilder()
       .setName('new')
       .setDescription('Create a new support ticket.'),
-  aliases: ['-new', 'transcript', '-transcript', 'close', '-close'],
-
+    
+    new SlashCommandBuilder()
+      .setName('add')
+      .setDescription('Add a user to the current ticket.')
+      .addUserOption(opt =>
+        opt.setName('user').setDescription('User to add').setRequired(true)
+      ),
+      new SlashCommandBuilder()
+      .setName('remove')
+      .setDescription('Remove a user to the current ticket.')
+      .addUserOption(opt =>
+        opt.setName('user').setDescription('User to remove').setRequired(true)
+      )
+  ],
+  aliases: ['-new', 'transcript', '-transcript', 'close', '-close', 'createticketmenu'],
   run: async (bot) => {
+
     log("Ticket auto-move logic initialized.");
     bot.on('messageCreate', async (message) => {
         if (
@@ -214,7 +265,93 @@ module.exports = {
   async execute(interaction, bot) {
       const isSlash = interaction.isChatInputCommand?.();
       const cmd = isSlash ? interaction.commandName : interaction.content?.split(' ')[0]?.slice(1);
+    // handle create menu 
+if (cmd === 'createticketmenu' || cmd === '-createticketmenu') {
+  if (cmd === 'createticketmenu' || cmd === '-createticketmenu') {
+  
+    const supportButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('create_ticket')
+        .setLabel('🎫 Create Support Ticket')
+        .setStyle(ButtonStyle.Primary)
+    );
+  
+    await interaction.channel.send({
+      content: '📩 **Need help?**\nIf you require assistance, please click the button below to open a support ticket. Our support team will respond as soon as possible.',
+      components: [supportButton]
+    });
+  
+    return;
+  }
+  
+}
+      // Handle -add
+if (cmd === 'add' || cmd === '-add') {
+  const args = interaction.content?.split(' ').slice(1);
+  let userToAdd
+  if (!args) userToAdd = await interaction?.options?.getUser('user')
+    else userToAdd = await resolveMember(interaction.guild, args.join(' '))
 
+  if (!userToAdd) {
+    return interaction.reply({ content: '❌ Please specify a user to add to the ticket.', ephemeral: true });
+  }
+
+  const channel = interaction.channel;
+  if (!channel.name?.startsWith('ticket-')) {
+    return interaction.reply({ content: '❌ This is not a ticket channel.', ephemeral: true });
+  }
+
+  await channel.permissionOverwrites.edit(userToAdd.id, {
+    ViewChannel: true,
+    SendMessages: true,
+    ReadMessageHistory: true
+  });
+
+  return interaction.reply({ content: `✅ <@${userToAdd.id}> has been added to the ticket.` });
+}
+
+// Handle -remove
+if (cmd === 'remove' || cmd === '-remove') {
+  const args = interaction.content?.split(' ').slice(1);
+  let userToRemove
+  if (!args) userToRemove = await interaction?.options?.getUser('user')
+    else userToRemove = await resolveMember(interaction.guild, args.join(' '))
+
+
+  if (!userToRemove) {
+    return interaction.reply({ content: '❌ Could not find that user.', ephemeral: true });
+  }
+
+  const channel = interaction.channel;
+  if (!channel.name?.startsWith('ticket-')) {
+    return interaction.reply({ content: '❌ This is not a ticket channel.', ephemeral: true });
+  }
+
+  const statePath = path.join(DATA_DIR, `${channel.id}.json`);
+  const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath)) : null;
+
+  const isStaff = userToRemove?.roles?.cache?.some(r => config.transcripts?.mentionRoles?.includes(r.id));
+  const isCloser = interaction.user.id === state?.creatorId ||
+    interaction.member.roles.cache.some(r => config.transcripts?.closingRoles?.includes(r.id));
+
+  if (!state) {
+    return interaction.reply({ content: '❌ Could not read ticket state.', ephemeral: true });
+  }
+
+  if (!isCloser) {
+    return interaction.reply({ content: '❌ Only the ticket creator or staff can remove members.', ephemeral: true });
+  }
+
+  if (isStaff) {
+    return interaction.reply({ content: '❌ You cannot remove a staff member from a ticket.', ephemeral: true });
+  }
+
+  await channel.permissionOverwrites.delete(userToRemove.id).catch(() => {});
+  return interaction.reply({ content: `✅ <@${userToRemove.id}> has been removed from the ticket.` });
+}
+
+      
+      
       if (config.transcripts?.commandsEnabled && ['transcript', '-transcript'].includes(cmd)) {
           return await handleTranscriptCommand(interaction);
       }
