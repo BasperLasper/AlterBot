@@ -25,3 +25,4 @@ temp/
 push.sh
 transcripts-web/nodejs/public/
 transcripts-web/nodejs/public/*
+**/transcripts-web/nodejs/public/*
