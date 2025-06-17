@@ -23,6 +23,6 @@ build/
 tmp/
 temp/
 push.sh
-transcripts-web/nodejs/public/transcripts/
-transcripts-web/nodejs/public/transcripts/
+transcripts-web/nodejs/public/transcripts/*
 **/transcripts-web/nodejs/public/transcripts/
+modules_configs/Tickets/Data/*
