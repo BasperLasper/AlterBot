@@ -107,52 +107,110 @@ module.exports = {
       .setName('new')
       .setDescription('Create a new support ticket.'),
   aliases: ['-new', 'transcript', '-transcript', 'close', '-close'],
+
   run: async (bot) => {
-      bot.on('messageCreate', async (message) => {
-        log("Ticket auto-move logic initialized.");
+    log("Ticket auto-move logic initialized.");
+    bot.on('messageCreate', async (message) => {
         if (
-              message.author.bot ||
-              !message.guild ||
-              !message.channel.name?.startsWith('ticket-')
-          ) return;
-          log(`📥 Message received in ${message.channel?.name}`);
-          const statePath = path.join(DATA_DIR, `${message.channel.id}.json`);
-          if (!fs.existsSync(statePath)) return;
+            message.author.bot ||
+            !message.guild ||
+            !message.channel.name?.startsWith('ticket-')
+        ) return;
 
-          const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
-          const staffRoleIds = findStaffRoleIds(config.categories, state.path);
-          const isStaff = message.member?.roles.cache.some(role => staffRoleIds.includes(role.id));
-          const isCreator = message.author.id === state.creatorId;
+        log(`📥 Message received in ${message.channel?.name}`);
+        const statePath = path.join(DATA_DIR, `${message.channel.id}.json`);
+        if (!fs.existsSync(statePath)) return;
 
-          const currentCategoryId = message.channel.parentId;
-          const assignedCategoryId = state.current?.categoryId;
-          const waitingCategoryId = config.waitingCategoryId;
-          const responsedCategoryId = config.responsedCategoryId;
+        const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+        const staffRoleIds = findStaffRoleIds(config.categories, state.path);
+        const isStaff = message.member?.roles.cache.some(role => staffRoleIds.includes(role.id));
+        const isCreator = message.author.id === state.creatorId;
 
-          // Staff response → move to Responsed category
-          if (isStaff && responsedCategoryId && currentCategoryId !== responsedCategoryId) {
-              try {
-                  await message.channel.setParent(responsedCategoryId);
-                  log(`✅ Moved ticket ${message.channel.name} to Responsed category`);
-                } catch (err) {
-                  console.warn(`❌ Failed to move to Responsed: ${err.message}`);
-              }
-          }
+        const currentCategoryId = message.channel.parentId;
+        const assignedCategoryId = state.current?.categoryId;
+        const waitingCategoryId = config.waitingCategoryId;
+        const responsedCategoryId = config.responsedCategoryId;
 
-          // Creator or non-staff response → move back to original or waiting
-          if (!isStaff && (currentCategoryId !== assignedCategoryId && currentCategoryId !== waitingCategoryId)) {
-              const targetCategoryId = assignedCategoryId ?? waitingCategoryId;
-              if (targetCategoryId) {
-                  try {
-                      await message.channel.setParent(targetCategoryId);
-                      log(`✅ Moved ticket ${message.channel.name} back to ${targetCategoryId}`);
+        // Check if @everyone can view the category
+        async function checkCategoryPermissions(categoryId) {
+            const category = await message.guild.channels.fetch(categoryId);
+            const everyoneOverwrite = category.permissionOverwrites.cache.get(message.guild.id);
+            return everyoneOverwrite ? everyoneOverwrite.allow.has(PermissionFlagsBits.ViewChannel) : false;
+        }
+
+        // Move to Responsed category (staff response)
+        if (isStaff && responsedCategoryId && currentCategoryId !== responsedCategoryId) {
+            try {
+                // Check if @everyone can see the Responsed category
+                const canSeeResponsed = await checkCategoryPermissions(responsedCategoryId);
+
+                // If @everyone can see the category, deny @everyone permission to view the channel
+                if (canSeeResponsed) {
+                    await message.channel.permissionOverwrites.edit(message.guild.id, {
+                      ViewChannel: false
+                    });
+                    log(`🔒 Denied @everyone permission to view the channel before moving.`);
+                }
+
+                // Store the current permissions
+                const channelPermissions = message.channel.permissionOverwrites.cache;
+
+                // Move the ticket to the new category (responsedCategoryId) WITHOUT locking permissions
+                await message.channel.setParent(responsedCategoryId, { lockPermissions: false });
+                log(`✅ Moved ticket ${message.channel.name} to Responsed category`);
+
+                // Reapply the permissions that were set before the move
+                for (const [id, overwrite] of channelPermissions.entries()) {
+                    try {
+                        await message.channel.permissionOverwrites.edit(id, overwrite);
                     } catch (err) {
-                      console.warn(`❌ Failed to move back to original: ${err.message}`);
-                  }
-              }
-          }
-      })
-  },
+                        console.warn(`❌ Failed to reapply permission for ${id}: ${err.message}`);
+                    }
+                }
+            } catch (err) {
+                console.warn(`❌ Failed to move to Responsed: ${err.message}`);
+            }
+        }
+
+        // Move back to original or waiting category (non-staff or creator response)
+        if (!isStaff && (currentCategoryId !== assignedCategoryId && currentCategoryId !== waitingCategoryId)) {
+            const targetCategoryId = assignedCategoryId ?? waitingCategoryId;
+            if (targetCategoryId) {
+                try {
+                    // Check if @everyone can see the target category
+                    const canSeeTargetCategory = await checkCategoryPermissions(targetCategoryId);
+
+                    // If @everyone can see the category, deny @everyone permission to view the channel
+                    if (canSeeTargetCategory) {
+                        await message.channel.permissionOverwrites.edit(message.guild.id, {
+                          ViewChannel: false
+                        });
+                        log(`🔒 Denied @everyone permission to view the channel before moving.`);
+                    }
+
+                    // Store the current permissions
+                    const channelPermissions = message.channel.permissionOverwrites.cache;
+
+                    // Move the ticket back to the original or waiting category WITHOUT locking permissions
+                    await message.channel.setParent(targetCategoryId, { lockPermissions: false });
+                    log(`✅ Moved ticket ${message.channel.name} back to ${targetCategoryId}`);
+
+                    // Reapply the permissions that were set before the move
+                    for (const [id, overwrite] of channelPermissions.entries()) {
+                        try {
+                            await message.channel.permissionOverwrites.edit(id, overwrite);
+                        } catch (err) {
+                            console.warn(`❌ Failed to reapply permission for ${id}: ${err.message}`);
+                        }
+                    }
+                } catch (err) {
+                    console.warn(`❌ Failed to move back to original: ${err.message}`);
+                }
+            }
+        }
+    });
+},
+
   async execute(interaction, bot) {
       const isSlash = interaction.isChatInputCommand?.();
       const cmd = isSlash ? interaction.commandName : interaction.content?.split(' ')[0]?.slice(1);
@@ -289,7 +347,7 @@ async function handleClose(channel, creatorId, closerId, closerMember) {
   if (!state) return;
 
   try {
-    if (state.current.categoryId) await channel.setParent(state.current.categoryId);
+    if (state.current.categoryId) await channel.setParent(state.current.runId);
   } catch {}
 
   const staffRoleIds = findStaffRoleIds(config.categories, state.path);
