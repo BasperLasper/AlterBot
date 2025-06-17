@@ -9,8 +9,17 @@
   "keywords": [],
   "author": "Basper",
   "license": "ISC",
-  "description": "",
+  "description": "Website transcripts uploader for AlterBot tickets (self-hosted)",
   "dependencies": {
     "express": "^5.1.0"
-  }
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BasperLasper/test.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BasperLasper/test/issues"
+  },
+  "homepage": "https://github.com/BasperLasper/test#readme"
 }
