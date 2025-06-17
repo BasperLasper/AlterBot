@@ -63,6 +63,7 @@ if (!fs.existsSync(CONFIG_FILE)) {
       "commandsEnabled": true,
       "uploadURL": null,
       "uploadURLPrefix": "https://yourdomain.com/transcripts/",
+      "transcriptRoles": [],
       "closingRoles": [],
       "mentionRoles": []
     }
@@ -402,6 +403,8 @@ async function handleCloseCommand(interaction) {
 }
 
 async function handleTranscriptCommand(interaction) {
+  if (!interaction.member.roles.cache.some(r => config.transcripts?.transcriptRoles?.includes(r.id))) return interaction.reply({ content: '❌ You do not have permission to generate transcripts.', ephemeral: true })
+  
   const target = interaction.options?.getChannel?.('channel') || interaction.mentions?.channels?.first() || interaction.channel;
   if (!target?.name?.startsWith('ticket-')) {
     return await interaction.reply({ content: '❌ This is not a valid ticket channel.', ephemeral: true });
