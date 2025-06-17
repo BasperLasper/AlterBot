@@ -3,11 +3,14 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-
 const app = express();
-const PORT = 3001;
-
 const transcriptsDir = path.join(__dirname, 'public', 'transcripts');
+
+  // You might want to edit these
+  const PORT = 3001;
+  const siteTitle = 'AlterHaven Ticket Transcript';
+  const ogImage = 'https://cdn.discordapp.com/icons/721067131906818098/fe98eddd7c24281248e7a3ef061d6aca.png?size=128';
+  const siteDescription = 'Support ticket conversation transcript.'
 
 if (!fs.existsSync(transcriptsDir)) {
   fs.mkdirSync(transcriptsDir, { recursive: true });
@@ -42,10 +45,6 @@ app.get('/transcripts/:filename', (req, res) => {
     return res.status(404).send('Transcript not found.');
   }
 
-  // Metadata wrapper
-  const siteTitle = 'AlterHaven Ticket Transcript';
-  const ogImage = 'https://cdn.discordapp.com/icons/721067131906818098/fe98eddd7c24281248e7a3ef061d6aca.png?size=128';
-  const siteDescription = 'Support ticket conversation transcript.'
   const htmlContent = fs.readFileSync(filePath, 'utf-8');
 
   const wrappedHtml = `
