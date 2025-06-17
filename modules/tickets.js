@@ -260,85 +260,119 @@ module.exports = {
   },
 
   async handle(interaction, bot) {
-      if (!interaction.isStringSelectMenu() && !interaction.isButton()) return;
-
-      const [type, ticketId, creatorId] = interaction.customId.split(':');
-      const statePath = path.join(DATA_DIR, `${interaction.channel.id}.json`);
-      const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath)) : null;
-      if (!state) return;
-
-      const userId = interaction.user.id;
-      const isCloser = userId === creatorId || interaction.member.roles.cache.some(r => config.transcripts?.closingRoles?.includes(r.id));
-
-      if (interaction.isButton()) {
-          if (type === 'close') {
-              if (!isCloser) return interaction.reply({
-                  content: '❌ You do not have permission to close this ticket.',
-                  ephemeral: true
-              });
-
-              const confirm = new ButtonBuilder().setCustomId(`confirm:${ticketId}:${creatorId}`).setLabel('✅ Confirm Close').setStyle(ButtonStyle.Danger);
-              const cancel = new ButtonBuilder().setCustomId(`cancel:${ticketId}:${creatorId}`).setLabel('❎ Cancel').setStyle(ButtonStyle.Secondary);
-              const row = new ActionRowBuilder().addComponents(confirm, cancel);
-
-              return await interaction.reply({
-                  content: '⚠️ Are you sure you want to close this ticket?',
-                  components: [row],
-                  ephemeral: true
-              });
-          }
-
-          if (type === 'confirm') {
-              if (!isCloser) return;
-              await interaction.deferUpdate();
-              await handleClose(interaction.channel, creatorId, userId, interaction.member);
-              return;
-          }
-
-          if (type === 'cancel') {
-              if (!isCloser) return;
-              await interaction.reply({
-                  content: '✅ Ticket closure cancelled.',
-                  ephemeral: true
-              });
-              return;
-          }
-      }
-
-      // Select Menu Handler
-      if (!interaction.values?.length) return;
-
-      const selected = interaction.values[0];
-      if (type === 'category') {
-          const branch = state.current.children?.[selected];
-          if (!branch) return;
-
-          state.current = branch;
-          state.path = [...(state.path || []), selected];
-          fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-
-          const embed = buildSummaryEmbed(state.path, state.answers);
-          const messages = await interaction.channel.messages.fetch({
-              limit: 10
+    if (!interaction.isStringSelectMenu() && !interaction.isButton()) return;
+  
+    if (!interaction.customId || !interaction.customId.includes(':')) return;
+    const [type, ticketId, creatorId] = interaction.customId.split(':');
+    const statePath = path.join(DATA_DIR, `${interaction.channel.id}.json`);
+    const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath)) : null;
+    if (!state) return;
+  
+    const userId = interaction.user.id;
+    const isCloser = userId === creatorId || interaction.member.roles.cache.some(r => config.transcripts?.closingRoles?.includes(r.id));
+  
+    if (interaction.isButton()) {
+      if (type === 'close') {
+        if (!isCloser) return interaction.reply({
+          content: '❌ You do not have permission to close this ticket.',
+          ephemeral: true
+        });
+  
+        const confirm = new ButtonBuilder().setCustomId(`confirm:${ticketId}:${creatorId}`).setLabel('✅ Confirm Close').setStyle(ButtonStyle.Danger);
+        const cancel = new ButtonBuilder().setCustomId(`cancel:${ticketId}:${creatorId}`).setLabel('❎ Cancel').setStyle(ButtonStyle.Secondary);
+        const row = new ActionRowBuilder().addComponents(confirm, cancel);
+  
+        await interaction.reply({
+          content: '⚠️ Are you sure you want to close this ticket?',
+          components: [row],
+          ephemeral: true
+        }).catch(async () => {
+          await interaction.editReply({
+            content: '⚠️ Are you sure you want to close this ticket?',
+            components: [row]
           });
-          const botMsg = messages.filter(m => m.author.id === interaction.client.user.id && m.embeds.length).first();
-          if (botMsg) await botMsg.edit({
-              embeds: [embed]
-          });
-
-          await interaction.message.delete().catch(() => {});
-          if (branch.children) {
-              return await showSelectMenu(interaction.channel, `category:${interaction.channel.id}:${interaction.user.id}`, Object.keys(branch.children), 'Choose a sub-category:');
-          }
-
-          if (branch.questions) {
-              state.questions = branch.questions;
-              state.answers = [];
-              fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-              return await askQuestions(interaction.channel, interaction.user, state);
-          }
+        });
+  
+        return;
       }
+  
+      if (type === 'confirm') {
+        if (!isCloser) return;
+  
+        // Disable buttons and provide feedback
+        try {
+          const disabledRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId('confirm-disabled')
+              .setLabel('✅ Confirm Close')
+              .setStyle(ButtonStyle.Danger)
+              .setDisabled(true),
+            new ButtonBuilder()
+              .setCustomId('cancel-disabled')
+              .setLabel('❎ Cancel')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(true)
+          );
+  
+          await interaction.update({
+            content: '⏳ Generating transcript and closing the ticket...',
+            components: [disabledRow]
+          });
+        } catch (err) {
+          console.warn('Failed to update confirm message:', err.message);
+        }
+  
+        await handleClose(interaction.channel, creatorId, userId, interaction.member);
+        return;
+      }
+  
+      if (type === 'cancel') {
+        if (!isCloser) return;
+  
+        try {
+          await interaction.update({
+            content: '✅ Ticket closure cancelled.',
+            components: []
+          });
+        } catch (err) {
+          console.error('❌ Interaction Error (cancel button):', err);
+        }
+  
+        return;
+      }
+    }
+  
+    // Select Menu Handler
+    if (!interaction.values?.length) return;
+  
+    const selected = interaction.values[0];
+    if (type === 'category') {
+      const branch = state.current.children?.[selected];
+      if (!branch) return;
+  
+      state.current = branch;
+      state.path = [...(state.path || []), selected];
+      fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+  
+      const embed = buildSummaryEmbed(state.path, state.answers);
+      const messages = await interaction.channel.messages.fetch({ limit: 10 });
+      const botMsg = messages.filter(m => m.author.id === interaction.client.user.id && m.embeds.length).first();
+      if (botMsg) await botMsg.edit({ embeds: [embed] });
+  
+      await interaction.message.delete().catch(() => {});
+      if (branch.children) {
+        return await showSelectMenu(interaction.channel, `category:${interaction.channel.id}:${interaction.user.id}`, Object.keys(branch.children), 'Choose a sub-category:');
+      }
+  
+      if (branch.questions) {
+        state.questions = branch.questions;
+        state.answers = [];
+        fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+        return await askQuestions(interaction.channel, interaction.user, state);
+      }
+    }
   }
+  
 };
 
 async function handleClose(channel, creatorId, closerId, closerMember) {
@@ -358,26 +392,7 @@ async function handleClose(channel, creatorId, closerId, closerMember) {
   }
 
   if (config.transcripts?.enabled) {
-    const transcript = await discordTranscripts.createTranscript(channel, {
-      limit: -1,
-      returnType: 'attachment',
-      fileName: `${channel.name}.html`,
-      poweredBy: false,
-      preamble: {
-        content: `📋 Transcript from **${channel.guild.name}**`,
-        embeds: [
-          {
-            title: `Server: ${channel.guild.name}`,
-            thumbnail: {
-              url: channel.guild.iconURL({ extension: 'png', size: 256 })
-            },
-            description: `Transcript for ticket **${channel.name}**`,
-            color: 0x5865f2,
-            timestamp: new Date().toISOString()
-          }
-        ]
-      }
-    });
+    const { transcript, transcriptUrl } = await handleTranscriptGeneration(null, channel);
     log(`📄 Transcript ${transcript.name} created for ${channel.name}`);
 
     const nowUnix = Math.floor(Date.now() / 1000);
@@ -386,24 +401,6 @@ async function handleClose(channel, creatorId, closerId, closerMember) {
     const roleLine = closerRole ? ` (${closerRole.name})` : '';
 
     const transcriptChannel = config.transcripts.channelId ? await channel.guild.channels.fetch(config.transcripts.channelId).catch(() => null) : null;
-    let transcriptUrl = null;
-
-    if (config.transcripts.uploadURL) {
-      try {
-        const form = new FormData();
-        form.append('file', transcript.attachment, transcript.name);
-        form.append('channel_id', channel.id);
-
-        const res = await axios.post(config.transcripts.uploadURL, form, { headers: form.getHeaders() });
-        if (res.data?.filename && config.transcripts.uploadURLPrefix) {
-          const safePrefix = config.transcripts.uploadURLPrefix.replace(/\/$/, ''); // removes trailing slash if present
-          transcriptUrl = `${safePrefix}/${res.data.filename}`;
-        }
-        
-              } catch (e) {
-        console.warn('Transcript upload failed. Falling back to Discord upload.');
-      }
-    }
 
     if (transcriptChannel?.isTextBased()) {
       const messageContent = [
@@ -423,16 +420,32 @@ async function handleClose(channel, creatorId, closerId, closerMember) {
     if (config.transcripts.dmCreator && closerId !== creatorId) {
       const creator = await channel.guild.members.fetch(creatorId).catch(() => null);
       if (creator?.send) {
-        const message = transcriptUrl ? transcriptUrl : { files: [transcript] };
-        await creator.send({ content: `📁 Transcript for your ticket in ${channel.guild.name}`, ...message }).catch(() => {});
+        if (transcriptUrl) {
+          await creator.send({
+            content: `📁 Transcript for your ticket in ${channel.guild.name}: ${transcriptUrl}`
+          }).catch(() => {});
+        } else {
+          await creator.send({
+            content: `📁 Transcript for your ticket in ${channel.guild.name}`,
+            files: [transcript]
+          }).catch(() => {});
+        }
       }
     }
 
     if (config.transcripts.dmCloser) {
       const closer = await channel.guild.members.fetch(closerId).catch(() => null);
       if (closer?.send) {
-        const message = transcriptUrl ? transcriptUrl : { files: [transcript] };
-        await closer.send({ content: `📁 Transcript for closed ticket in ${channel.guild.name}`, ...message }).catch(() => {});
+        if (transcriptUrl) {
+          await closer.send({
+            content: `📁 Transcript for closed ticket in ${channel.guild.name}: ${transcriptUrl}`
+          }).catch(() => {});
+        } else {
+          await closer.send({
+            content: `📁 Transcript for closed ticket in ${channel.guild.name}`,
+            files: [transcript]
+          }).catch(() => {});
+        }
       }
     }
   }
@@ -460,16 +473,8 @@ async function handleCloseCommand(interaction) {
   return await handleClose(channel, state.creatorId, interaction.user.id, interaction.member);
 }
 
-async function handleTranscriptCommand(interaction) {
-  if (!interaction.member.roles.cache.some(r => config.transcripts?.transcriptRoles?.includes(r.id))) return interaction.reply({ content: '❌ You do not have permission to generate transcripts.', ephemeral: true })
-  
-  const target = interaction.options?.getChannel?.('channel') || interaction.mentions?.channels?.first() || interaction.channel;
-  if (!target?.name?.startsWith('ticket-')) {
-    return await interaction.reply({ content: '❌ This is not a valid ticket channel.', ephemeral: true });
-  }
 
-  await interaction.deferReply({ ephemeral: true });
-
+async function handleTranscriptGeneration(interaction, target) {
   const transcript = await discordTranscripts.createTranscript(target, {
     limit: -1,
     returnType: 'attachment',
@@ -477,8 +482,8 @@ async function handleTranscriptCommand(interaction) {
     poweredBy: false
   });
 
-  // Try upload
   let transcriptUrl = null;
+
   if (config.transcripts?.uploadURL) {
     try {
       const form = new FormData();
@@ -488,29 +493,46 @@ async function handleTranscriptCommand(interaction) {
       const res = await axios.post(config.transcripts.uploadURL, form, {
         headers: form.getHeaders()
       });
+
       if (res.data?.url) {
         transcriptUrl = `${config.transcripts.publicURLPrefix.replace(/\/$/, '')}/${res.data.url.replace(/^\//, '')}`;
       }
-          } catch (err) {
-      console.warn('Transcript upload failed in -transcript command:', err.message);
+    } catch (err) {
+      console.warn('Transcript upload failed:', err.message);
     }
   }
 
-  // Send result
+  return { transcript, transcriptUrl };
+}
+
+
+async function handleTranscriptCommand(interaction) {
+  if (!interaction.member.roles.cache.some(r => config.transcripts?.transcriptRoles?.includes(r.id))) {
+    return interaction.reply({ content: '❌ You do not have permission to generate transcripts.', ephemeral: true });
+  }
+
+  const target = interaction.options?.getChannel?.('channel') || interaction.mentions?.channels?.first() || interaction.channel;
+  if (!target?.name?.startsWith('ticket-')) {
+    return await interaction.reply({ content: '❌ This is not a valid ticket channel.', ephemeral: true });
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const { transcript, transcriptUrl } = await handleTranscriptGeneration(interaction, target);
+
   if (transcriptUrl) {
-     await interaction.editReply({
+    await interaction.editReply({
       content: `📎 Transcript uploaded: ${transcriptUrl}`
     });
-    return   log(`🌐 Transcript uploaded to: ${transcriptUrl}`);
-
+    return log(`🌐 Transcript uploaded to: ${transcriptUrl}`);
   } else {
     await interaction.editReply({
       content: `📎 Transcript generated:`,
       files: [transcript]
     });
-    return   log(`🌐 Transcript upload failed to: ${transcriptUrl}`);
+    return log(`🌐 Transcript upload failed to: ${transcriptUrl}`);
   }
-}
+  }
 
 
 async function handleCategorySelection(bot, channel, member, tree) {
