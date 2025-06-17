@@ -18,6 +18,10 @@ const CONFIG_DIR = path.join(__dirname, '..', 'modules_configs', 'Tickets');
 const DATA_DIR = path.join(CONFIG_DIR, 'Data');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const COUNTER_FILE = path.join(DATA_DIR, 'ticket_counter.json');
+const LOGS_ENABLED = process.argv.includes('--logs');
+const log = (...args) => {
+  if (LOGS_ENABLED) console.log('[TICKETS]', ...args);
+};
 
 if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -50,6 +54,7 @@ if (!fs.existsSync(CONFIG_FILE)) {
       }
     },
     "waitingCategoryId": null,
+    "responsedCategoryId": null,
     "transcripts": {
       "enabled": true,
       "channelId": null,
@@ -98,116 +103,183 @@ function findStaffRoleIds(categories, path = []) {
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('new')
-    .setDescription('Create a new support ticket.'),
+      .setName('new')
+      .setDescription('Create a new support ticket.'),
   aliases: ['-new', 'transcript', '-transcript', 'close', '-close'],
+  run: async (bot) => {
+    log("Ticket auto-move logic initialized.");
+      bot.on('messageCreate', async (message) => {
+        log(`📥 Message received in ${message.channel?.name}`);
+        if (
+              message.author.bot ||
+              !message.guild ||
+              !message.channel.name?.startsWith('ticket-')
+          ) return;
 
+          const statePath = path.join(DATA_DIR, `${message.channel.id}.json`);
+          if (!fs.existsSync(statePath)) return;
+
+          const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+          const staffRoleIds = findStaffRoleIds(config.categories, state.path);
+          const isStaff = message.member?.roles.cache.some(role => staffRoleIds.includes(role.id));
+          const isCreator = message.author.id === state.creatorId;
+
+          const currentCategoryId = message.channel.parentId;
+          const assignedCategoryId = state.current?.categoryId;
+          const waitingCategoryId = config.waitingCategoryId;
+          const responsedCategoryId = config.responsedCategoryId;
+
+          // Staff response → move to Responsed category
+          if (isStaff && responsedCategoryId && currentCategoryId !== responsedCategoryId) {
+              try {
+                  await message.channel.setParent(responsedCategoryId);
+                  log(`✅ Moved ticket ${message.channel.name} to Responsed category`);
+                } catch (err) {
+                  console.warn(`❌ Failed to move to Responsed: ${err.message}`);
+              }
+          }
+
+          // Creator or non-staff response → move back to original or waiting
+          if (!isStaff && (currentCategoryId !== assignedCategoryId && currentCategoryId !== waitingCategoryId)) {
+              const targetCategoryId = assignedCategoryId ?? waitingCategoryId;
+              if (targetCategoryId) {
+                  try {
+                      await message.channel.setParent(targetCategoryId);
+                      log(`✅ Moved ticket ${message.channel.name} back to ${targetCategoryId}`);
+                    } catch (err) {
+                      console.warn(`❌ Failed to move back to original: ${err.message}`);
+                  }
+              }
+          }
+      })
+  },
   async execute(interaction, bot) {
-    const isSlash = interaction.isChatInputCommand?.();
-    const cmd = isSlash ? interaction.commandName : interaction.content?.split(' ')[0]?.slice(1);
+      const isSlash = interaction.isChatInputCommand?.();
+      const cmd = isSlash ? interaction.commandName : interaction.content?.split(' ')[0]?.slice(1);
 
-    if (config.transcripts?.commandsEnabled && ['transcript', '-transcript'].includes(cmd)) {
-      return await handleTranscriptCommand(interaction);
-    }
+      if (config.transcripts?.commandsEnabled && ['transcript', '-transcript'].includes(cmd)) {
+          return await handleTranscriptCommand(interaction);
+      }
 
-    if (['close', '-close'].includes(cmd)) {
-      return await handleCloseCommand(interaction);
-    }
+      if (['close', '-close'].includes(cmd)) {
+          return await handleCloseCommand(interaction);
+      }
 
-    await interaction.deferReply({ flags: 64 });
-
-    const channelName = getNextTicketName();
-    const guild = interaction.guild;
-    const member = interaction.member;
-
-    const overwrites = [
-      { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-      { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
-    ];
-    const staffRoleIds = config.categories?.["Minecraft Issues"]?.staffRoleIds ?? [];
-    for (const roleId of staffRoleIds) {
-      overwrites.push({
-        id: roleId,
-        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+      await interaction.deferReply({
+          flags: 64
       });
-    }
 
-    const channel = await guild.channels.create({
-      name: channelName,
-      type: ChannelType.GuildText,
-      parent: config.waitingCategoryId ?? null,
-      permissionOverwrites: overwrites
-    });
+      const channelName = getNextTicketName();
+      const guild = interaction.guild;
+      const member = interaction.member;
 
-    await interaction.editReply(`🎟 Ticket created: ${channel}`);
-    handleCategorySelection(bot, channel, member, config.categories);
+      const overwrites = [{
+              id: guild.id,
+              deny: [PermissionFlagsBits.ViewChannel]
+          },
+          {
+              id: member.id,
+              allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+          }
+      ];
+      const staffRoleIds = config.categories?.["Minecraft Issues"]?.staffRoleIds ?? [];
+      for (const roleId of staffRoleIds) {
+          overwrites.push({
+              id: roleId,
+              allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+          });
+      }
+
+      const channel = await guild.channels.create({
+          name: channelName,
+          type: ChannelType.GuildText,
+          parent: config.waitingCategoryId ?? null,
+          permissionOverwrites: overwrites
+      });
+      log(`🎟️ Ticket ${channelName} created by ${member.user.tag}`);
+      await interaction.editReply(`🎟 Ticket created: ${channel}`);
+      handleCategorySelection(bot, channel, member, config.categories);
   },
 
   async handle(interaction, bot) {
-    if (!interaction.isStringSelectMenu() && !interaction.isButton()) return;
+      if (!interaction.isStringSelectMenu() && !interaction.isButton()) return;
 
-    const [type, ticketId, creatorId] = interaction.customId.split(':');
-    const statePath = path.join(DATA_DIR, `${interaction.channel.id}.json`);
-    const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath)) : null;
-    if (!state) return;
+      const [type, ticketId, creatorId] = interaction.customId.split(':');
+      const statePath = path.join(DATA_DIR, `${interaction.channel.id}.json`);
+      const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath)) : null;
+      if (!state) return;
 
-    const userId = interaction.user.id;
-    const isCloser = userId === creatorId || interaction.member.roles.cache.some(r => config.transcripts?.closingRoles?.includes(r.id));
+      const userId = interaction.user.id;
+      const isCloser = userId === creatorId || interaction.member.roles.cache.some(r => config.transcripts?.closingRoles?.includes(r.id));
 
-    if (interaction.isButton()) {
-      if (type === 'close') {
-        if (!isCloser) return interaction.reply({ content: '❌ You do not have permission to close this ticket.', ephemeral: true });
+      if (interaction.isButton()) {
+          if (type === 'close') {
+              if (!isCloser) return interaction.reply({
+                  content: '❌ You do not have permission to close this ticket.',
+                  ephemeral: true
+              });
 
-        const confirm = new ButtonBuilder().setCustomId(`confirm:${ticketId}:${creatorId}`).setLabel('✅ Confirm Close').setStyle(ButtonStyle.Danger);
-        const cancel = new ButtonBuilder().setCustomId(`cancel:${ticketId}:${creatorId}`).setLabel('❎ Cancel').setStyle(ButtonStyle.Secondary);
-        const row = new ActionRowBuilder().addComponents(confirm, cancel);
+              const confirm = new ButtonBuilder().setCustomId(`confirm:${ticketId}:${creatorId}`).setLabel('✅ Confirm Close').setStyle(ButtonStyle.Danger);
+              const cancel = new ButtonBuilder().setCustomId(`cancel:${ticketId}:${creatorId}`).setLabel('❎ Cancel').setStyle(ButtonStyle.Secondary);
+              const row = new ActionRowBuilder().addComponents(confirm, cancel);
 
-        return await interaction.reply({ content: '⚠️ Are you sure you want to close this ticket?', components: [row], ephemeral: true });
+              return await interaction.reply({
+                  content: '⚠️ Are you sure you want to close this ticket?',
+                  components: [row],
+                  ephemeral: true
+              });
+          }
+
+          if (type === 'confirm') {
+              if (!isCloser) return;
+              await interaction.deferUpdate();
+              await handleClose(interaction.channel, creatorId, userId, interaction.member);
+              return;
+          }
+
+          if (type === 'cancel') {
+              if (!isCloser) return;
+              await interaction.reply({
+                  content: '✅ Ticket closure cancelled.',
+                  ephemeral: true
+              });
+              return;
+          }
       }
 
-      if (type === 'confirm') {
-        if (!isCloser) return;
-        await interaction.deferUpdate();
-        await handleClose(interaction.channel, creatorId, userId, interaction.member);
-        return;
+      // Select Menu Handler
+      if (!interaction.values?.length) return;
+
+      const selected = interaction.values[0];
+      if (type === 'category') {
+          const branch = state.current.children?.[selected];
+          if (!branch) return;
+
+          state.current = branch;
+          state.path = [...(state.path || []), selected];
+          fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+          const embed = buildSummaryEmbed(state.path, state.answers);
+          const messages = await interaction.channel.messages.fetch({
+              limit: 10
+          });
+          const botMsg = messages.filter(m => m.author.id === interaction.client.user.id && m.embeds.length).first();
+          if (botMsg) await botMsg.edit({
+              embeds: [embed]
+          });
+
+          await interaction.message.delete().catch(() => {});
+          if (branch.children) {
+              return await showSelectMenu(interaction.channel, `category:${interaction.channel.id}:${interaction.user.id}`, Object.keys(branch.children), 'Choose a sub-category:');
+          }
+
+          if (branch.questions) {
+              state.questions = branch.questions;
+              state.answers = [];
+              fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+              return await askQuestions(interaction.channel, interaction.user, state);
+          }
       }
-
-      if (type === 'cancel') {
-        if (!isCloser) return;
-        await interaction.reply({ content: '✅ Ticket closure cancelled.', ephemeral: true });
-        return;
-      }
-    }
-
-    // Select Menu Handler
-    if (!interaction.values?.length) return;
-
-    const selected = interaction.values[0];
-    if (type === 'category') {
-      const branch = state.current.children?.[selected];
-      if (!branch) return;
-
-      state.current = branch;
-      state.path = [...(state.path || []), selected];
-      fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-
-      const embed = buildSummaryEmbed(state.path, state.answers);
-      const messages = await interaction.channel.messages.fetch({ limit: 10 });
-      const botMsg = messages.filter(m => m.author.id === interaction.client.user.id && m.embeds.length).first();
-      if (botMsg) await botMsg.edit({ embeds: [embed] });
-
-      await interaction.message.delete().catch(() => {});
-      if (branch.children) {
-        return await showSelectMenu(interaction.channel, `category:${interaction.channel.id}:${interaction.user.id}`, Object.keys(branch.children), 'Choose a sub-category:');
-      }
-
-      if (branch.questions) {
-        state.questions = branch.questions;
-        state.answers = [];
-        fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-        return await askQuestions(interaction.channel, interaction.user, state);
-      }
-    }
   }
 };
 
@@ -248,7 +320,7 @@ async function handleClose(channel, creatorId, closerId, closerMember) {
         ]
       }
     });
-    
+    log(`📄 Transcript ${transcript.name} created for ${channel.name}`);
 
     const nowUnix = Math.floor(Date.now() / 1000);
     const closerMention = `<@${closerId}>`;
@@ -366,14 +438,17 @@ async function handleTranscriptCommand(interaction) {
 
   // Send result
   if (transcriptUrl) {
-    return await interaction.editReply({
+     await interaction.editReply({
       content: `📎 Transcript uploaded: ${transcriptUrl}`
     });
+    return   log(`🌐 Transcript uploaded to: ${transcriptUrl}`);
+
   } else {
-    return await interaction.editReply({
+    await interaction.editReply({
       content: `📎 Transcript generated:`,
       files: [transcript]
     });
+    return   log(`🌐 Transcript upload failed to: ${transcriptUrl}`);
   }
 }
 
