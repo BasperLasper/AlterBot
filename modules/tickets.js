@@ -260,6 +260,51 @@ module.exports = {
             }
         }
     });
+    log("Create Ticket Menu loading")
+    bot.on('interactionCreate', async (interaction) => {
+      if (!interaction.isButton()) return;
+      if (interaction.customId !== 'create_ticket') return;
+      log("Create Ticket Menu action started")
+  
+      const member = interaction.member;
+      const guild = interaction.guild;
+  
+      const channelName = getNextTicketName();
+      const overwrites = [
+        {
+          id: guild.id,
+          deny: [PermissionFlagsBits.ViewChannel],
+        },
+        {
+          id: member.id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+        }
+      ];
+  
+      const staffRoleIds = config.categories?.["Minecraft Issues"]?.staffRoleIds ?? [];
+      for (const roleId of staffRoleIds) {
+        overwrites.push({
+          id: roleId,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+        });
+      }
+  
+      const channel = await guild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
+        parent: config.waitingCategoryId ?? null,
+        permissionOverwrites: overwrites
+      });
+  
+      log(`🎟️ Ticket ${channelName} created by ${member.user.tag}`);
+  
+      await interaction.reply({
+        content: `✅ Your ticket has been created: <#${channel.id}>`,
+        ephemeral: true
+      });
+  
+      handleCategorySelection(bot, channel, member, config.categories);
+    });
 },
 
   async execute(interaction, bot) {
