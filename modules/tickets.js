@@ -13,7 +13,6 @@ const {
   StringSelectMenuBuilder
 } = require('discord.js');
 const discordTranscripts = require('discord-html-transcripts');
-
 const CONFIG_DIR = path.join(__dirname, '..', 'modules_configs', 'Tickets');
 const DATA_DIR = path.join(CONFIG_DIR, 'Data');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
@@ -311,8 +310,13 @@ module.exports = {
       const isSlash = interaction.isChatInputCommand?.();
       const cmd = isSlash ? interaction.commandName : interaction.content?.split(' ')[0]?.slice(1);
     // handle create menu 
-if (cmd === 'createticketmenu' || cmd === '-createticketmenu') {
   if (cmd === 'createticketmenu' || cmd === '-createticketmenu') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({
+        content: '❌ You do not have permission to use this command.',
+        ephemeral: true
+      });
+    }
   
     const supportButton = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -329,7 +333,7 @@ if (cmd === 'createticketmenu' || cmd === '-createticketmenu') {
     return;
   }
   
-}
+
       // Handle -add
 if (cmd === 'add' || cmd === '-add') {
   const args = interaction.content?.split(' ').slice(1);
