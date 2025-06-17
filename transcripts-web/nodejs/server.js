@@ -4,14 +4,16 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const app = express();
+
 const transcriptsDir = path.join(__dirname, 'public', 'transcripts');
 
-  // You might want to edit these
-  const PORT = 3001;
-  const siteTitle = 'AlterHaven Ticket Transcript';
-  const ogImage = 'https://cdn.discordapp.com/icons/721067131906818098/fe98eddd7c24281248e7a3ef061d6aca.png?size=128';
-  const siteDescription = 'Support ticket conversation transcript.'
+// You might want to edit these
+const PORT = 3001;
+const siteTitle = 'AlterHaven Ticket Transcript';
+const ogImage = 'https://cdn.discordapp.com/icons/721067131906818098/fe98eddd7c24281248e7a3ef061d6aca.png?size=128';
+const siteDescription = 'Support ticket conversation transcript.';
 
+// Create base transcripts folder if missing
 if (!fs.existsSync(transcriptsDir)) {
   fs.mkdirSync(transcriptsDir, { recursive: true });
 }
@@ -61,13 +63,16 @@ app.get('/transcripts/:filename', (req, res) => {
         <style>body, html { margin:0; padding:0; height:100%; }</style>
       </head>
       <body>
-        <iframe srcdoc="${htmlContent.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" style="width:100%; height:100%; border:none;"></iframe>
+        <iframe srcdoc="${htmlContent
+          .replace(/&/g, '&amp;')
+          .replace(/"/g, '&quot;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')}" style="width:100%; height:100%; border:none;"></iframe>
       </body>
     </html>
   `;
 
-  res.type('html');
-  res.send(wrappedHtml);
+  res.type('html').send(wrappedHtml);
 });
 
 // Upload endpoint
@@ -87,5 +92,5 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🟢 Transcript upload server is running at http://alterhaven.com:${PORT}`);
+  console.log(`🟢 Transcript upload server is running at http://localhost:${PORT}`);
 });
