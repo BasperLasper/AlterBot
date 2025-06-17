@@ -280,14 +280,6 @@ module.exports = {
         }
       ];
   
-      const staffRoleIds = config.categories?.["Minecraft Issues"]?.staffRoleIds ?? [];
-      for (const roleId of staffRoleIds) {
-        overwrites.push({
-          id: roleId,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
-        });
-      }
-  
       const channel = await guild.channels.create({
         name: channelName,
         type: ChannelType.GuildText,
@@ -426,13 +418,6 @@ if (cmd === 'remove' || cmd === '-remove') {
               allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
           }
       ];
-      const staffRoleIds = config.categories?.["Minecraft Issues"]?.staffRoleIds ?? [];
-      for (const roleId of staffRoleIds) {
-          overwrites.push({
-              id: roleId,
-              allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
-          });
-      }
 
       const channel = await guild.channels.create({
           name: channelName,
