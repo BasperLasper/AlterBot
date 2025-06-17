@@ -107,15 +107,14 @@ module.exports = {
       .setDescription('Create a new support ticket.'),
   aliases: ['-new', 'transcript', '-transcript', 'close', '-close'],
   run: async (bot) => {
-    log("Ticket auto-move logic initialized.");
       bot.on('messageCreate', async (message) => {
-        log(`📥 Message received in ${message.channel?.name}`);
+        log("Ticket auto-move logic initialized.");
         if (
               message.author.bot ||
               !message.guild ||
               !message.channel.name?.startsWith('ticket-')
           ) return;
-
+          log(`📥 Message received in ${message.channel?.name}`);
           const statePath = path.join(DATA_DIR, `${message.channel.id}.json`);
           if (!fs.existsSync(statePath)) return;
 
