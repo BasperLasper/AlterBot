@@ -40,7 +40,14 @@ const upload = multer({ storage });
 
 // Serve transcript with metadata
 app.get('/transcripts/:filename', (req, res) => {
-  const filename = req.params.filename.replace(/[^\w\-.]/g, '');
+  // Sanitize filename param
+  let filename = req.params.filename.replace(/[^\w\-.]/g, '');
+  
+  // Ensure filename ends with .html
+  if (!filename.endsWith('.html')) {
+    filename += '.html';
+  }
+
   const filePath = path.join(transcriptsDir, filename);
 
   if (!fs.existsSync(filePath)) {
@@ -74,6 +81,7 @@ app.get('/transcripts/:filename', (req, res) => {
 
   res.type('html').send(wrappedHtml);
 });
+
 
 // Upload endpoint
 app.post('/upload', upload.single('file'), (req, res) => {
