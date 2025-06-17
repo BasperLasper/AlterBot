@@ -3,11 +3,21 @@ const path = require('path');
 
 async function loadModules(bot) {
   const modulePath = path.join(__dirname, '..', 'modules');
+  console.log(`📁 Loading modules from: ${modulePath}`);
+
+  if (!fs.existsSync(modulePath)) {
+    console.warn(`⚠️ Module path does not exist: ${modulePath}`);
+    return;
+  }
+
   const files = fs.readdirSync(modulePath).filter(f => f.endsWith('.js'));
+  console.log(`🔍 Found ${files.length} module(s): ${files.join(', ')}`);
 
   for (const file of files) {
     try {
-      const mod = require(path.join(modulePath, file));
+      const fullPath = path.join(modulePath, file);
+      console.log(`📦 Importing module: ${file}`);
+      const mod = require(fullPath);
 
       // Slash or message-based command
       if (mod.data && typeof mod.execute === 'function') {
@@ -21,13 +31,13 @@ async function loadModules(bot) {
             bot.commands.set(alias, mod);
           }
         }
-        console.log(`✅ Command ${mod.data.name} loaded.`);
+        console.log(`✅ Command loaded: ${mod.data.name}`);
       }
 
-      // Optional module logic
+      // Module logic (like messageCreate listener)
       if (typeof mod.run === 'function') {
         await mod.run(bot);
-        console.log(mod.messages?.loaded || `✅ Module ${file} loaded.`);
+        console.log(`🛠️  Module logic run: ${file}`);
       }
     } catch (err) {
       console.error(`❌ Failed to load module ${file}:`, err);
