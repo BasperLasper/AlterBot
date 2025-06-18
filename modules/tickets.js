@@ -750,11 +750,14 @@ async function askQuestions(channel, user, state) {
 }
 
 async function finalizeTicket(channel, user, state) {
-  try {
-    const finalCategoryId = state.current.categoryId;
-    if (finalCategoryId) await channel.setParent(finalCategoryId);
-  } catch {}
 
+  const finalCategoryId = state.current.categoryId;
+  if (finalCategoryId) {
+    await channel.setParent(finalCategoryId).catch(err => console.warn(`Failed to set parent: ${err.message}`));
+  } else {
+    console.warn(`No categoryId found for path: ${state.path.join(' > ')}`);
+  }
+  
   const staffRoleIds = findStaffRoleIds(config.categories, state.path);
 
   // Grant staff roles permission to view and send messages in the ticket channel
