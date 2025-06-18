@@ -1054,7 +1054,12 @@ async function handleClose(channel, creatorId, closerId, closerMember, db, inter
     WHERE channelid = ?
   `).run(new Date().toISOString(), channel.id);
   db.prepare('DELETE FROM autoclose WHERE channelid = ?').run(channel.id);
-
+  try {
+    await channel.delete();
+    log(`🗑️ Ticket channel ${channel.name} deleted`);
+  } catch (e) {
+    log('Ticket channel could not be deleted due to error')
+  }
   // Defer channel deletion to ensure interaction response is sent
   try {
     if (interaction) {
@@ -1065,10 +1070,8 @@ async function handleClose(channel, creatorId, closerId, closerMember, db, inter
     } else {
       await channel.send(`✅ Ticket closed. Reason: ${reason}`);
     }
-    await channel.delete();
-    log(`🗑️ Ticket channel ${channel.name} deleted`);
   } catch (err) {
-    console.warn(`Failed to delete channel or send follow-up: ${err.message}`);
+    console.warn(`Failed to send follow-up: ${err.message}`);
   }
 }
 
@@ -1230,6 +1233,19 @@ async function askQuestions(channel, user, state, db, bot) {
   const embedMsg = messages.find(
     (m) => m.author.id === botInstance?.user?.id && m.embeds.length > 0
   );
+  // generate staff roles nice and early
+  const staffRoleIds = findStaffRoleIds(config.categories, state.category_path);
+
+  for (const roleId of staffRoleIds) {
+    try {
+      await channel.permissionOverwrites.edit(roleId, {
+        ViewChannel: true,
+        SendMessages: true,
+      });
+    } catch (err) {
+      console.warn(`Failed to edit overwrite permission for role ${roleId}: ${err.message}`);
+    }
+  }
 
   // Set autoclose timeout for questions
   const timeout = setTimeout(async () => {
@@ -1295,18 +1311,19 @@ async function finalizeTicket(channel, user, state, db) {
     log(`❌ No categoryId found for path: ${state.category_path?.join(' > ')}`);
   }
 
-  const staffRoleIds = findStaffRoleIds(config.categories, state.category_path);
+  const closeButton = new ButtonBuilder()
+    .setCustomId(`close:${channel.id}:${user.id}`)
+    .setLabel('Close Ticket')
+    .setStyle(ButtonStyle.Danger);
 
-  for (const roleId of staffRoleIds) {
-    try {
-      await channel.permissionOverwrites.edit(roleId, {
-        ViewChannel: true,
-        SendMessages: true,
-      });
-    } catch (err) {
-      console.warn(`Failed to edit overwrite permission for role ${roleId}: ${err.message}`);
-    }
-  }
+  const row = new ActionRowBuilder().addComponents(closeButton);
+
+  await channel.send({
+    content: staffRoleIds.map((id) => `<@&${id}>`).join(' ') + ' ✅ Ticket completed.',
+    components: [row],
+  });
+
+  
 
   try {
     const PRIVATE_THREAD = ChannelType?.PrivateThread || 12;
@@ -1336,16 +1353,4 @@ async function finalizeTicket(channel, user, state, db) {
   } catch (err) {
     console.error('Failed to create staff notes thread:', err.message);
   }
-
-  const closeButton = new ButtonBuilder()
-    .setCustomId(`close:${channel.id}:${user.id}`)
-    .setLabel('Close Ticket')
-    .setStyle(ButtonStyle.Danger);
-
-  const row = new ActionRowBuilder().addComponents(closeButton);
-
-  await channel.send({
-    content: staffRoleIds.map((id) => `<@&${id}>`).join(' ') + ' ✅ Ticket completed.',
-    components: [row],
-  });
 }
