@@ -80,26 +80,19 @@ function getNextTicketName() {
   return `ticket-${String(counter.last).padStart(4, '0')}`;
 }
 
-function findStaffRoleIds(categories, path = []) {
-  if (!path.length) return [];
-  let node = categories[path[0]];
-  if (!node) return [];
-
-  for (let i = 1; i < path.length; i++) {
-    node = node.children?.[path[i]];
-    if (!node) break;
+function findStaffRoleIds(categories, path) {
+  let node = categories;
+  for (const key of path) {
+    node = node[key]?.children || node[key];
+    if (!node) return [];
   }
-
-  for (let i = path.length; i >= 1; i--) {
-    let checkNode = categories[path[0]];
-    for (let j = 1; j < i; j++) {
-      checkNode = checkNode?.children?.[path[j]];
-    }
-    if (Array.isArray(checkNode?.staffRoleIds)) return checkNode.staffRoleIds;
+  while (node) {
+    if (Array.isArray(node.staffRoleIds)) return node.staffRoleIds;
+    node = Object.values(node.children || {})[0];
   }
-
   return [];
 }
+
 async function resolveMember(guild, input) {
   if (!guild || !input) return null;
 
@@ -296,6 +289,7 @@ module.exports = {
   
       handleCategorySelection(bot, channel, member, config.categories);
     });
+    
 },
 
   async execute(interaction, bot) {
