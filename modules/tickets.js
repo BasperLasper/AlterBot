@@ -254,7 +254,8 @@ module.exports = {
         },
         {
           id: member.id,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+          allow: [PermissionFlagsBits.ViewChannel],
+          deny: [PermissionFlagsBits.SendMessages]
         }
       ];
   
@@ -498,7 +499,7 @@ if (cmd === 'remove' || cmd === '-remove') {
     const selected = interaction.values[0];
     if (type === 'category') {
       const branch = state.current.children?.[selected];
-      if (!branch) return;
+      if (!branch) return interaction.channel.permissionOverwrites.edit(interaction.user, { ViewChannel: true, SendMessages: true })
   
       state.current = branch;
       state.path = [...(state.path || []), selected];
@@ -755,7 +756,7 @@ async function finalizeTicket(channel, user, state) {
   if (finalCategoryId) {
     await channel.setParent(finalCategoryId).catch(err => console.warn(`Failed to set parent: ${err.message}`));
   } else {
-    console.warn(`No categoryId found for path: ${state.path.join(' > ')}`);
+    log(`No categoryId found for path: ${state.path.join(' > ')}`);
   }
   
   const staffRoleIds = findStaffRoleIds(config.categories, state.path);
