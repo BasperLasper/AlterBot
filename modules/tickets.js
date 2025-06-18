@@ -4,11 +4,11 @@ const axios = require('axios');
 const FormData = require('form-data');
 const {
   SlashCommandBuilder,
-  ChannelType,
   PermissionFlagsBits,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
+  ChannelType,
   ButtonStyle,
   StringSelectMenuBuilder
 } = require('discord.js');
@@ -777,17 +777,56 @@ async function finalizeTicket(channel, user, state) {
   } catch {}
 
   const staffRoleIds = findStaffRoleIds(config.categories, state.path);
+
+  // Grant staff roles permission to view and send messages in the ticket channel
   for (const roleId of staffRoleIds) {
     try {
       await channel.permissionOverwrites.edit(roleId, { ViewChannel: true, SendMessages: true });
     } catch {}
   }
 
+  // Create a private thread for staff notes
+  try {
+    const PRIVATE_THREAD = ChannelType?.PrivateThread ?? 12;
+const staffThread = await channel.threads.create({
+  name: 'Staff Notes',
+  autoArchiveDuration: 60,
+  type: PRIVATE_THREAD,
+  reason: 'Staff discussion for ticket',
+  invitable: true,
+});
+
+    // Allow only staff members to view and send messages in the thread
+for (const roleId of staffRoleIds) {
+  const role = await channel.guild.roles.fetch(roleId);
+  if (!role) continue;
+
+  const staffMembers = role.members;
+  for (const member of staffMembers.values()) {
+    try {
+      await staffThread.members.add(member.id);
+    } catch (err) {
+      console.warn(`Could not add ${member.user.tag} to staff thread:`, err.message);
+    }
+  }
+}
+    // Optional welcome message in the staff thread
+    await staffThread.send('📝 This is the staff-only discussion thread for this ticket.');
+
+  } catch (err) {
+    console.error('Failed to create staff notes thread:', err);
+  }
+
+  // Close ticket button
   const closeButton = new ButtonBuilder()
     .setCustomId(`close:${channel.id}:${user.id}`)
     .setLabel('Close Ticket')
     .setStyle(ButtonStyle.Danger);
 
   const row = new ActionRowBuilder().addComponents(closeButton);
-  await channel.send({ content: staffRoleIds.map(id => `<@&${id}>`).join(' ') + ' ✅ Ticket completed.', components: [row] });
+
+  await channel.send({
+    content: staffRoleIds.map(id => `<@&${id}>`).join(' ') + ' ✅ Ticket completed.',
+    components: [row],
+  });
 }
