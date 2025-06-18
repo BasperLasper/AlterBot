@@ -95,35 +95,20 @@ function findStaffRoleIds(categories, path) {
 
 async function resolveMember(guild, input) {
   if (!guild || !input) return null;
-
-  // Clean up input (e.g., <@123> => 123)
-  const idMatch = input.match(/^<@!?(\d+)>$/);
-  const rawInput = idMatch ? idMatch[1] : input.trim();
-
-  // Try by ID first
+  const id = input.match(/^<@!?(\d+)>$/)?.[1] || input.trim();
   try {
-    const memberById = await guild.members.fetch({ user: rawInput, cache: true }).catch(() => null);
-    if (memberById) return memberById;
-  } catch {}
-
-  const lower = rawInput.toLowerCase();
-
-  // Try cache lookup by username, display name or tag
-  const cached = guild.members.cache.find(m =>
-    m.user.username.toLowerCase() === lower ||
-    m.displayName?.toLowerCase() === lower ||
-    `${m.user.username.toLowerCase()}#${m.user.discriminator}` === lower
-  );
-  if (cached) return cached;
-
-  // Fallback: fetch all members and try again
-  try {
-    const fetchedMembers = await guild.members.fetch({ query: rawInput, limit: 10 });
-    return fetchedMembers.find(m =>
-      m.user.username.toLowerCase() === lower ||
-      m.displayName?.toLowerCase() === lower ||
-      `${m.user.username.toLowerCase()}#${m.user.discriminator}` === lower
-    ) || null;
+    return await guild.members.fetch(id) ||
+           guild.members.cache.find(m => 
+             m.user.username.toLowerCase() === id.toLowerCase() ||
+             m.displayName?.toLowerCase() === id.toLowerCase() ||
+             `${m.user.username.toLowerCase()}#${m.user.discriminator}` === id.toLowerCase()
+           ) ||
+           (await guild.members.fetch({ query: id, limit: 10 }))
+             .find(m => 
+               m.user.username.toLowerCase() === id.toLowerCase() ||
+               m.displayName?.toLowerCase() === id.toLowerCase() ||
+               `${m.user.username.toLowerCase()}#${m.user.discriminator}` === id.toLowerCase()
+             );
   } catch {
     return null;
   }
