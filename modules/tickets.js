@@ -78,9 +78,11 @@ if (!fs.existsSync(CONFIG_FILE)) {
 
 const config = require(CONFIG_FILE);
 
-// Store active timeouts for select menus and questions
+// Store active timeouts for select menus, questions, and autoclose
 const selectMenuTimeouts = new Map();
 const questionTimeouts = new Map();
+const autocloseTimeouts = new Map();
+let botInstance = null;
 
 function initializeDatabase() {
   const db = new Database(DB_FILE);
@@ -143,8 +145,7 @@ async function resolveMember(guild, input) {
         (m) =>
           m.user.username.toLowerCase() === id.toLowerCase() ||
           m.displayName?.toLowerCase() === id.toLowerCase() ||
-          `${m.user.username.toLowerCase()}#${m.user.discriminator}` ===
-            id.toLowerCase()
+          `${m.user.username.toLowerCase()}#${m.user.discriminator}` === id.toLowerCase()
       ) ||
       (
         await guild.members.fetch({ query: id, limit: 10 })
@@ -152,8 +153,7 @@ async function resolveMember(guild, input) {
         (m) =>
           m.user.username.toLowerCase() === id.toLowerCase() ||
           m.displayName?.toLowerCase() === id.toLowerCase() ||
-          `${m.user.username.toLowerCase()}#${m.user.discriminator}` ===
-            id.toLowerCase()
+          `${m.user.username.toLowerCase()}#${m.user.discriminator}` === id.toLowerCase()
       )
     );
   } catch {
@@ -176,26 +176,66 @@ function parseDuration(durationStr) {
   return value * multipliers[unit];
 }
 
-function scheduleAutoclose(channel, closeAt, reason, db, bot) {
-  const msUntilClose = new Date(closeAt).getTime() - Date.now();
-  if (msUntilClose <= 0) {
-    handleClose(channel, null, bot.user.id, null, db, null, `Autoclose: ${reason}`);
+function scheduleAutoclose(channel, closeAt, reason, db) {
+  if (!botInstance) {
+    console.warn(`Cannot schedule autoclose for channel ${channel.id}: botInstance is not defined`);
     return;
   }
 
-  setTimeout(async () => {
+  const msUntilClose = new Date(closeAt).getTime() - Date.now();
+  if (msUntilClose <= 0) {
+    handleClose(channel, null, botInstance.user.id, null, db, null, `Autoclose: ${reason}`);
+    return;
+  }
+
+  const timeout = setTimeout(async () => {
     const autocloseRecord = db.prepare('SELECT * FROM autoclose WHERE channelid = ?').get(channel.id);
     if (!autocloseRecord) return; // Autoclose was canceled
     try {
       const ticket = db.prepare('SELECT * FROM tickets WHERE channelid = ?').get(channel.id);
       if (ticket && ticket.active_status === 'open') {
-        await handleClose(channel, ticket.creator_id, bot.user.id, null, db, null, `Autoclose: ${reason}`);
+        await handleClose(channel, ticket.creator_id, botInstance.user.id, null, db, null, `Autoclose: ${reason}`);
       }
       db.prepare('DELETE FROM autoclose WHERE channelid = ?').run(channel.id);
     } catch (err) {
       console.warn(`Failed to autoclose channel ${channel.id}: ${err.message}`);
     }
+    autocloseTimeouts.delete(channel.id);
   }, msUntilClose);
+
+  autocloseTimeouts.set(channel.id, timeout);
+  log(`Scheduled autoclose for channel ${channel.id} at ${closeAt}`);
+}
+
+async function initializeAutocloseTasks(db) {
+  const autocloseTasks = db.prepare('SELECT * FROM autoclose').all();
+  for (const task of autocloseTasks) {
+    try {
+      const channel = await botInstance.channels.fetch(task.channelid);
+      scheduleAutoclose(channel, task.close_at, task.reason, db);
+      log(`Loaded autoclose task for channel ${task.channelid} at ${task.close_at}`);
+    } catch (err) {
+      console.warn(`Failed to load autoclose task for channel ${task.channelid}: ${err.message}`);
+    }
+  }
+}
+
+function cleanup() {
+  // Clear all timeouts to prevent stale callbacks
+  for (const [channelId, timeout] of selectMenuTimeouts) {
+    clearTimeout(timeout);
+    selectMenuTimeouts.delete(channelId);
+  }
+  for (const [channelId, timeout] of questionTimeouts) {
+    clearTimeout(timeout);
+    questionTimeouts.delete(channelId);
+  }
+  for (const [channelId, timeout] of autocloseTimeouts) {
+    clearTimeout(timeout);
+    autocloseTimeouts.delete(channelId);
+  }
+  botInstance = null;
+  log('Cleaned up ticket system timeouts');
 }
 
 module.exports = {
@@ -211,34 +251,40 @@ module.exports = {
       ),
     new SlashCommandBuilder()
       .setName('remove')
-      .setDescription('Remove a user to the current ticket.')
+      .setDescription('Remove a user from the current ticket.')
       .addUserOption((opt) =>
         opt.setName('user').setDescription('User to remove').setRequired(true)
       ),
   ],
   aliases: ['-new', 'transcript', '-transcript', 'close', '-close', 'createticketmenu', 'autoclose', '-autoclose'],
   run: async (bot) => {
+    botInstance = bot;
     const db = initializeDatabase();
-    log("Ticket auto-move logic initialized.");
+    log('Ticket auto-move logic initialized.');
 
-    // Load pending autoclose tasks
-    const autocloseTasks = db.prepare('SELECT * FROM autoclose').all();
-    for (const task of autocloseTasks) {
-      try {
-        const channel = await bot.channels.fetch(task.channelid);
-        scheduleAutoclose(channel, task.close_at, task.reason, db, bot);
-        log(`Scheduled autoclose for channel ${task.channelid} at ${task.close_at}`);
-      } catch (err) {
-        console.warn(`Failed to schedule autoclose for channel ${task.channelid}: ${err.message}`);
-      }
-    }
+    // Initialize autoclose tasks after bot is ready
+    bot.on('ready', async () => {
+      log('Bot is ready, initializing autoclose tasks.');
+      await initializeAutocloseTasks(db);
+    });
+
+    // Register cleanup on bot shutdown
+    process.on('SIGINT', () => {
+      cleanup();
+      process.exit(0);
+    });
+    process.on('SIGTERM', () => {
+      cleanup();
+      process.exit(0);
+    });
 
     bot.on('messageCreate', async (message) => {
       if (
         message.author.bot ||
         !message.guild ||
         !message.channel.name?.startsWith('ticket-')
-      ) return;
+      )
+        return;
 
       log(`📥 Message received in ${message.channel?.name}`);
       const state = db.prepare('SELECT * FROM tickets WHERE channelid = ?').get(message.channel.id);
@@ -250,9 +296,7 @@ module.exports = {
       state.answers = JSON.parse(state.answers);
 
       const staffRoleIds = findStaffRoleIds(config.categories, state.category_path);
-      const isStaff = message.member?.roles.cache.some((role) =>
-        staffRoleIds.includes(role.id)
-      );
+      const isStaff = message.member?.roles.cache.some((role) => staffRoleIds.includes(role.id));
       const isCreator = message.author.id === state.creator_id;
 
       // Check if message is from creator or added member to cancel autoclose
@@ -261,10 +305,18 @@ module.exports = {
         (ow) => ow.id === message.author.id && ow.allow.has(PermissionFlagsBits.ViewChannel)
       );
       if ((isCreator || isAddedMember) && !isStaff) {
-        const autocloseRecord = db.prepare('SELECT * FROM autoclose WHERE channelid = ?').get(message.channel.id);
+        const autocloseRecord = db
+          .prepare('SELECT * FROM autoclose WHERE channelid = ?')
+          .get(message.channel.id);
         if (autocloseRecord) {
           db.prepare('DELETE FROM autoclose WHERE channelid = ?').run(message.channel.id);
-          await message.channel.send(`✅ Autoclose canceled due to activity from <@${message.author.id}>.`);
+          if (autocloseTimeouts.has(message.channel.id)) {
+            clearTimeout(autocloseTimeouts.get(message.channel.id));
+            autocloseTimeouts.delete(message.channel.id);
+          }
+          await message.channel.send(
+            `✅ Autoclose canceled due to activity from <@${message.author.id}>.`
+          );
           log(`Autoclose canceled for channel ${message.channel.id} due to user activity`);
         }
       }
@@ -358,16 +410,20 @@ module.exports = {
           WHERE channelid = ?
         `).run(new Date().toISOString(), channel.id);
         db.prepare('DELETE FROM autoclose WHERE channelid = ?').run(channel.id);
+        if (autocloseTimeouts.has(channel.id)) {
+          clearTimeout(autocloseTimeouts.get(channel.id));
+          autocloseTimeouts.delete(channel.id);
+        }
         log(`✅ Updated ticket ${channel.id} to closed in database`);
       }
     });
 
-    log("Create Ticket Menu loading");
+    log('Create Ticket Menu loading');
     bot.on('interactionCreate', async (interaction) => {
       if (!interaction.isButton()) return;
       if (interaction.customId !== 'create_ticket') return;
-      log("Create Ticket Menu action started");
 
+      log('Create Ticket Menu action started');
       const member = interaction.member;
       const guild = interaction.guild;
 
@@ -391,8 +447,7 @@ module.exports = {
         permissionOverwrites: overwrites,
       });
 
-      log(`🎟️ Ticket ${channelName} created by ${member.user.tag}`);
-
+      log(`🎫 Ticket ${channelName} created by ${member.user.tag}`);
       const state = {
         current_category: { children: config.categories },
         category_path: [],
@@ -522,7 +577,6 @@ module.exports = {
       }
 
       state.category_path = JSON.parse(state.category_path);
-
       const isStaff = userToRemove?.roles?.cache?.some((r) =>
         config.transcripts?.mentionRoles?.includes(r.id)
       );
@@ -581,7 +635,9 @@ module.exports = {
 
       const args = interaction.content?.split(' ').slice(1);
       if (args[0]?.toLowerCase() === 'cancel') {
-        const autocloseRecord = db.prepare('SELECT * FROM autoclose WHERE channelid = ?').get(channel.id);
+        const autocloseRecord = db
+          .prepare('SELECT * FROM autoclose WHERE channelid = ?')
+          .get(channel.id);
         if (!autocloseRecord) {
           return interaction.reply({
             content: '❌ No autoclose scheduled for this ticket.',
@@ -590,6 +646,10 @@ module.exports = {
         }
 
         db.prepare('DELETE FROM autoclose WHERE channelid = ?').run(channel.id);
+        if (autocloseTimeouts.has(channel.id)) {
+          clearTimeout(autocloseTimeouts.get(channel.id));
+          autocloseTimeouts.delete(channel.id);
+        }
         return interaction.reply({
           content: '✅ Autoclose canceled for this ticket.',
         });
@@ -619,12 +679,12 @@ module.exports = {
       `).run(channel.id, closeAt, reason);
 
       await channel.send({
-        content: `<@${state.creator_id}> ⚠️ This ticket is scheduled to autoclose in ${args[0]} due to: ${reason}. Reply to cancel the autoclose.`,
+        content: `<@${state.creator_id}> ⚠️ This ticket is scheduled to autoclose in ${args[0]} due to: ${reason}`,
       });
 
-      scheduleAutoclose(channel, closeAt, reason, db, bot);
+      scheduleAutoclose(channel, closeAt, reason, db);
 
-      return; // Removed redundant interaction.reply
+      return;
     }
 
     if (config.transcripts?.commandsEnabled && ['transcript', '-transcript'].includes(cmd)) {
@@ -658,7 +718,7 @@ module.exports = {
       parent: config.waitingCategoryId ?? null,
       permissionOverwrites: overwrites,
     });
-    log(`🎟️ Ticket ${channelName} created by ${member.user.tag}`);
+    log(`🎫 Ticket ${channelName} created by ${member.user.tag}`);
 
     const state = {
       current_category: { children: config.categories },
@@ -684,7 +744,7 @@ module.exports = {
       'open'
     );
 
-    await interaction.editReply(`🎟 Ticket created: ${channel}`);
+    await interaction.editReply(`🎫 Ticket created: ${channel}`);
     await handleCategorySelection(bot, channel, member, config.categories, db);
   },
 
@@ -729,9 +789,7 @@ module.exports = {
     const userId = interaction.user.id;
     const isCloser =
       userId === creatorId ||
-      interaction.member.roles.cache.some((r) =>
-        config.transcripts?.closingRoles?.includes(r.id)
-      );
+      interaction.member.roles.cache.some((r) => config.transcripts?.closingRoles?.includes(r.id));
 
     if (interaction.isButton()) {
       if (type === 'close') {
@@ -899,6 +957,10 @@ async function handleClose(channel, creatorId, closerId, closerMember, db, inter
     clearTimeout(questionTimeouts.get(channel.id));
     questionTimeouts.delete(channel.id);
   }
+  if (autocloseTimeouts.has(channel.id)) {
+    clearTimeout(autocloseTimeouts.get(channel.id));
+    autocloseTimeouts.delete(channel.id);
+  }
 
   try {
     if (state.current_category.categoryId) await channel.setParent(state.current_category.categoryId);
@@ -922,8 +984,8 @@ async function handleClose(channel, creatorId, closerId, closerMember, db, inter
     );
     const roleLine = closerRole ? ` (${closerRole.name})` : '';
 
-    const transcriptChannel = config.transcripts.channelId
-      ? await channel.guild.channels.fetch(config.transcripts.channelId).catch(() => null)
+    const transcriptChannel = config.transcripts?.channelId
+      ? await channel.guild?.channels.fetch(config.transcripts.channelId).catch(() => null)
       : null;
 
     if (transcriptChannel?.isTextBased()) {
@@ -964,7 +1026,7 @@ async function handleClose(channel, creatorId, closerId, closerMember, db, inter
       }
     }
 
-    if (config.transcripts.dmCloser && closerId && closerId !== bot.user.id) {
+    if (config.transcripts.dmCloser && closerId && closerId !== botInstance?.user?.id) {
       const closer = await channel.guild.members.fetch(closerId).catch(() => null);
       if (closer?.send) {
         if (transcriptUrl) {
@@ -976,7 +1038,7 @@ async function handleClose(channel, creatorId, closerId, closerMember, db, inter
         } else {
           await closer
             .send({
-              content: `📁 Transcript for closed ticket in ${channel.guild.name}\nReason: ${reason}`,
+              content: `📁 Transcript for closed ticket in ${channel.guild.name}\n${reason}`,
               files: [transcript],
             })
             .catch(() => {});
@@ -1012,7 +1074,7 @@ async function handleClose(channel, creatorId, closerId, closerMember, db, inter
 
 async function handleCloseCommand(interaction, db) {
   const channel = interaction.channel;
-  if (!channel.name?.startsWith('ticket-')) {
+  if (!channel?.name?.startsWith('ticket-')) {
     return await interaction.reply({
       content: '❌ This is not a ticket channel.',
       ephemeral: true,
@@ -1024,9 +1086,7 @@ async function handleCloseCommand(interaction, db) {
 
   const isCloser =
     interaction.user.id === state.creator_id ||
-    interaction.member.roles.cache.some((r) =>
-      config.transcripts?.closingRoles?.includes(r.id)
-    );
+    interaction.member.roles.cache.some((r) => config.transcripts?.closingRoles?.includes(r.id));
 
   if (!isCloser) {
     return await interaction.reply({
@@ -1059,7 +1119,10 @@ async function handleTranscriptGeneration(interaction, target) {
       });
 
       if (res.data?.url) {
-        transcriptUrl = `${config.transcripts.publicURLPrefix.replace(/\/$/, '')}/${res.data.url.replace(/^\//, '')}`;
+        transcriptUrl = `${config.transcripts.publicURLPrefix.replace(/\/$/, '')}/${res.data.url.replace(
+          /^\//,
+          ''
+        )}`;
       }
     } catch (err) {
       console.warn('Transcript upload failed:', err.message);
@@ -1071,9 +1134,7 @@ async function handleTranscriptGeneration(interaction, target) {
 
 async function handleTranscriptCommand(interaction) {
   if (
-    !interaction.member.roles.cache.some((r) =>
-      config.transcripts?.transcriptRoles?.includes(r.id)
-    )
+    !interaction.member.roles.cache.some((r) => config.transcripts?.transcriptRoles?.includes(r.id))
   ) {
     return interaction.reply({
       content: '❌ You do not have permission to generate transcripts.',
@@ -1082,8 +1143,8 @@ async function handleTranscriptCommand(interaction) {
   }
 
   const target =
-    interaction.options?.getChannel?.('channel') ||
-    interaction.mentions?.channels?.first() ||
+    interaction.options?.getChannel('channel') ||
+    (await interaction.mentions?.channels?.first()) ||
     interaction.channel;
   if (!target?.name?.startsWith('ticket-')) {
     return await interaction.reply({
@@ -1100,13 +1161,13 @@ async function handleTranscriptCommand(interaction) {
     await interaction.editReply({
       content: `📎 Transcript uploaded: ${transcriptUrl}`,
     });
-    return log(`🌐 Transcript uploaded to: ${transcriptUrl}`);
+    return log(`🌐 Transcript uploaded: ${transcriptUrl}`);
   } else {
     await interaction.editReply({
       content: `📎 Transcript generated:`,
       files: [transcript],
     });
-    return log(`🌐 Transcript upload failed to: ${transcriptUrl}`);
+    return log(`⚠️ Transcript upload failed to: ${transcriptUrl}`);
   }
 }
 
@@ -1133,23 +1194,33 @@ async function showSelectMenu(channel, customId, options, placeholder) {
   const timeout = setTimeout(async () => {
     const state = db.prepare('SELECT * FROM tickets WHERE channelid = ?').get(channel.id);
     if (state && state.active_status === 'open') {
-      await handleClose(channel, state.creator_id, null, null, db, null, 'Inactivity: No category selected within time limit');
+      await handleClose(
+        channel,
+        state.creator_id,
+        botInstance?.user?.id || null,
+        null,
+        db,
+        null,
+        'Inactivity: No category selected within time limit'
+      );
     }
     selectMenuTimeouts.delete(channel.id);
   }, config.selectMenuTimeout || 600000);
 
   selectMenuTimeouts.set(channel.id, timeout);
+  return message;
 }
 
 function buildSummaryEmbed(pathArray, answers = []) {
-  const embed = new EmbedBuilder()
-    .setTitle('📝 Ticket Summary')
-    .setColor(0x00AE86)
-    .setTimestamp();
+  const embed = new EmbedBuilder().setTitle('📝 Ticket Summary').setColor(0x222222).setTimestamp();
 
   const description = pathArray.map((p, i) => `${'➤'.repeat(i + 1)} ${p}`).join('\n');
-  if (description.length > 0) embed.setDescription(description);
-  for (const a of answers) embed.addFields({ name: a.question, value: a.answer });
+  if (description.length > 0) {
+    embed.setDescription(description);
+  }
+  for (const a of answers) {
+    embed.addFields({ name: a.question, value: a.answer });
+  }
 
   return embed;
 }
@@ -1157,7 +1228,7 @@ function buildSummaryEmbed(pathArray, answers = []) {
 async function askQuestions(channel, user, state, db, bot) {
   const messages = await channel.messages.fetch({ limit: 10 });
   const embedMsg = messages.find(
-    (m) => m.author.id === channel.client.user.id && m.embeds.length
+    (m) => m.author.id === botInstance?.user?.id && m.embeds.length > 0
   );
 
   // Set autoclose timeout for questions
@@ -1166,7 +1237,15 @@ async function askQuestions(channel, user, state, db, bot) {
     if (!currentState) return;
     currentState.answers = JSON.parse(currentState.answers);
     if (currentState.active_status === 'open' && currentState.answers.length < state.questions.length) {
-      await handleClose(channel, state.creator_id, null, null, db, null, 'Inactivity: Not all questions answered within time limit');
+      await handleClose(
+        channel,
+        state.creator_id,
+        botInstance?.user?.id || null,
+        null,
+        db,
+        null,
+        'Inactivity: Not all questions answered within time limit'
+      );
     }
     questionTimeouts.delete(channel.id);
   }, config.questionsTimeout || 1800000);
@@ -1192,12 +1271,7 @@ async function askQuestions(channel, user, state, db, bot) {
         questions = ?,
         answers = ?
       WHERE channelid = ?
-    `).run(
-      JSON.stringify(state.questions),
-      JSON.stringify(state.answers),
-      channel.id
-    );
-
+    `).run(JSON.stringify(state.questions), JSON.stringify(state.answers), channel.id);
     if (embedMsg)
       await embedMsg.edit({ embeds: [buildSummaryEmbed(state.category_path, state.answers)] });
   }
@@ -1214,23 +1288,28 @@ async function askQuestions(channel, user, state, db, bot) {
 async function finalizeTicket(channel, user, state, db) {
   const finalCategoryId = state.current_category.categoryId;
   if (finalCategoryId) {
-    await channel.setParent(finalCategoryId).catch((err) =>
-      console.warn(`Failed to set parent: ${err.message}`)
-    );
+    await channel.setParent(finalCategoryId).catch((err) => {
+      console.warn(`Failed to set parent: ${err.message}`);
+    });
   } else {
-    log(`No categoryId found for path: ${state.category_path.join(' > ')}`);
+    log(`❌ No categoryId found for path: ${state.category_path?.join(' > ')}`);
   }
 
   const staffRoleIds = findStaffRoleIds(config.categories, state.category_path);
 
   for (const roleId of staffRoleIds) {
     try {
-      await channel.permissionOverwrites.edit(roleId, { ViewChannel: true, SendMessages: true });
-    } catch {}
+      await channel.permissionOverwrites.edit(roleId, {
+        ViewChannel: true,
+        SendMessages: true,
+      });
+    } catch (err) {
+      console.warn(`Failed to edit overwrite permission for role ${roleId}: ${err.message}`);
+    }
   }
 
   try {
-    const PRIVATE_THREAD = ChannelType?.PrivateThread ?? 12;
+    const PRIVATE_THREAD = ChannelType?.PrivateThread || 12;
     const staffThread = await channel.threads.create({
       name: 'Staff Notes',
       autoArchiveDuration: 60,
@@ -1248,14 +1327,14 @@ async function finalizeTicket(channel, user, state, db) {
         try {
           await staffThread.members.add(member.id);
         } catch (err) {
-          console.warn(`Could not add ${member.user.tag} to staff thread:`, err.message);
+          console.warn(`Could not add ${member.user.tag} to staff thread: ${err.message}`);
         }
       }
     }
 
     await staffThread.send('📝 This is the staff-only discussion thread for this ticket.');
   } catch (err) {
-    console.error('Failed to create staff notes thread:', err);
+    console.error('Failed to create staff notes thread:', err.message);
   }
 
   const closeButton = new ButtonBuilder()

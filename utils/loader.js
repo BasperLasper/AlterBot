@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-async function loadModules(bot) {
+async function loadModules(bot, moduleCleanups) {
   const modulePath = path.join(__dirname, '..', 'modules');
   console.log(`📁 Loading modules from: ${modulePath}`);
 
@@ -47,17 +47,24 @@ async function loadModules(bot) {
             continue;
           }
           bot.commands.set(alias, mod);
+          console.log(`✅ Alias loaded: ${alias}`);
         }
       }
 
-      // Module logic (e.g. listeners)
+      // Module logic (e.g., listeners)
       if (typeof mod.run === 'function') {
         await mod.run(bot);
-        console.log(`🛠️  Module logic run: ${file}`);
+        console.log(`🛠️ Module logic run: ${file}`);
+      }
+
+      // Store cleanup function if provided
+      if (typeof mod.cleanup === 'function') {
+        moduleCleanups.set(file, mod.cleanup);
+        console.log(`✅ Cleanup function loaded for module: ${file}`);
       }
 
     } catch (err) {
-      console.error(`❌ Failed to load module ${file}:`, err);
+      console.error(`❌ Failed to load module ${file}: ${err.message}`);
     }
   }
 }

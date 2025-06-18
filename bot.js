@@ -9,8 +9,10 @@ if (!fs.existsSync(configPath)) {
   const defaultConfig = { token: '', clientId: '', guildId: '' };
   fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
   console.log('config.json not found. Created default config.json. Please fill it in and restart the bot.');
+  console.log('Process exiting...');
   process.exit(0);
 }
+
 const config = require(configPath);
 
 const bot = new Client({
@@ -28,19 +30,55 @@ bot.commands = new Collection();
 bot.modules = new Collection();
 bot.roleMenuReactions = new Map();
 
+// Store cleanup functions for each module
+const moduleCleanups = new Map();
+
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
 });
+
 rl.on('line', input => {
   if (input.trim().toLowerCase() === 'stop') {
     console.log('Stopping bot...');
+    for (const cleanup of moduleCleanups.values()) {
+      try {
+        cleanup();
+      } catch (err) {
+        console.error(`Error in cleanup: ${err.message}`);
+      }
+    }
     process.exit(0);
   }
 });
 
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Received SIGINT: Cleaning up...');
+  for (const cleanup of moduleCleanups.values()) {
+    try {
+      cleanup();
+    } catch (err) {
+      console.error(`Error in cleanup: ${err.message}`);
+    }
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM: Cleaning up...');
+  for (const cleanup of moduleCleanups.values()) {
+    try {
+      cleanup();
+    } catch (err) {
+      console.error(`Error in cleanup: ${err.message}`);
+    }
+  }
+  process.exit(0);
+});
+
 (async () => {
-  await loadModules(bot);
+  await loadModules(bot, moduleCleanups);
 
   const registered = new Set();
   const commands = [];
@@ -73,7 +111,7 @@ rl.on('line', input => {
   }
 })();
 
-// ✅ Unified interaction handler
+// Unified interaction handler
 bot.on('interactionCreate', async interaction => {
   try {
     if (interaction.isCommand()) {
