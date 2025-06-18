@@ -624,10 +624,7 @@ module.exports = {
 
       scheduleAutoclose(channel, closeAt, reason, db, bot);
 
-      return interaction.reply({
-        content: `✅ Autoclose scheduled in ${args[0]} for reason: ${reason}`,
-        ephemeral: true,
-      });
+      return; // Removed redundant interaction.reply
     }
 
     if (config.transcripts?.commandsEnabled && ['transcript', '-transcript'].includes(cmd)) {

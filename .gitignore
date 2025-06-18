@@ -1,5 +1,5 @@
 config.json
-**/config.json
+*/tickets.db
 node_modules/
 **/node_modules/
 logs
