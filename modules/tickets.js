@@ -300,9 +300,9 @@ module.exports = {
       const isStaff = message.member?.roles.cache.some((role) => staffRoleIds.includes(role.id));
       const isCreator = message.author.id === state.creator_id;
       if (state.assigned) {
-        console.log('✅ Assigned:', state.assigned);
+        log('✅ Assigned:', state.assigned);
       } else {
-        console.log('❌ Not assigned');
+        log('❌ Not assigned');
       }
       // Check if message is from creator or added member to cancel autoclose
       const overwrites = message.channel.permissionOverwrites.cache;
