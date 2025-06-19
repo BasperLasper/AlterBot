@@ -1241,18 +1241,6 @@ async function askQuestions(channel, user, state, db, bot) {
     (m) => m.author.id === botInstance?.user?.id && m.embeds.length > 0
   );
   // generate staff roles nice and early
-  const staffRoleIds = findStaffRoleIds(config.categories, state.category_path);
-
-  for (const roleId of staffRoleIds) {
-    try {
-      await channel.permissionOverwrites.edit(roleId, {
-        ViewChannel: true,
-        SendMessages: true,
-      });
-    } catch (err) {
-      console.warn(`Failed to edit overwrite permission for role ${roleId}: ${err.message}`);
-    }
-  }
 
   // Set autoclose timeout for questions
   const timeout = setTimeout(async () => {
@@ -1309,6 +1297,18 @@ async function askQuestions(channel, user, state, db, bot) {
 }
 
 async function finalizeTicket(channel, user, state, db) {
+  const staffRoleIds = findStaffRoleIds(config.categories, state.category_path);
+
+  for (const roleId of staffRoleIds) {
+    try {
+      await channel.permissionOverwrites.edit(roleId, {
+        ViewChannel: true,
+        SendMessages: true,
+      });
+    } catch (err) {
+      console.warn(`Failed to edit overwrite permission for role ${roleId}: ${err.message}`);
+    }
+  }
   const finalCategoryId = state.current_category.categoryId;
   if (finalCategoryId) {
     await channel.setParent(finalCategoryId).catch((err) => {
