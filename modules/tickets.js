@@ -12,6 +12,7 @@ const {
   ChannelType,
   ButtonStyle,
   StringSelectMenuBuilder,
+  GuildCategory
 } = require('discord.js');
 const discordTranscripts = require('discord-html-transcripts');
 
@@ -299,11 +300,7 @@ module.exports = {
       const staffRoleIds = findStaffRoleIds(config.categories, state.category_path);
       const isStaff = message.member?.roles.cache.some((role) => staffRoleIds.includes(role.id));
       const isCreator = message.author.id === state.creator_id;
-      if (state.assigned) {
-        log('✅ Assigned:', state.assigned);
-      } else {
-        log('❌ Not assigned');
-      }
+
       // Check if message is from creator or added member to cancel autoclose
       const overwrites = message.channel.permissionOverwrites.cache;
       const isAddedMember = overwrites.some(
@@ -330,7 +327,29 @@ module.exports = {
       const assignedCategoryId = state.current_category?.categoryId;
       const waitingCategoryId = config.waitingCategoryId;
       const responsedCategoryId = config.responsedCategoryId;
-
+      async function checkAssigned(assigned) {
+        const findUser = await resolveMember(message.guild, assigned)
+        if (findUser) {
+          let findAssignedCategory
+            findAssignedCategory = message.guild.channels.cache.find(
+            (ch) => ch.type === 4 && ch.name.toLowerCase() === findUser.user.username.toLowerCase()
+          );
+          if (!findAssignedCategory) {
+            findAssignedCategory = message.guild.channels.create({
+              name: findUser.user.username.toLowerCase(),
+              type: 4, // Category type
+              reason: `Created category for ${findUser.user.username.toLowerCase()}`,
+              permissionOverwrites: [
+                {
+                  id: message.guild.id, // This is @everyone
+                  deny: ['ViewChannel'],
+                },
+              ],
+            });
+          }
+          return findAssignedCategory.id
+        } else return log('user not found')
+      }
       async function checkCategoryPermissions(categoryId) {
         const category = await message.guild.channels.fetch(categoryId);
         const everyoneOverwrite = category.permissionOverwrites.cache.get(message.guild.id);
@@ -364,14 +383,17 @@ module.exports = {
           console.warn(`❌ Failed to move to Responsed: ${err.message}`);
         }
       }
-
+      const ticketAssigned = await checkAssigned(state.assigned)
       if (
         !isStaff &&
         currentCategoryId !== assignedCategoryId &&
-        currentCategoryId !== waitingCategoryId
+        currentCategoryId !== waitingCategoryId &&
+        currentCategoryId !== ticketAssigned
       ) {
-        const targetCategoryId = assignedCategoryId ?? waitingCategoryId;
+        let targetCategoryId
+        targetCategoryId = assignedCategoryId ?? waitingCategoryId;
         if (targetCategoryId) {
+          if (state.assigned) targetCategoryId = ticketAssigned
           try {
             const canSeeTargetCategory = await checkCategoryPermissions(targetCategoryId);
             if (canSeeTargetCategory) {
