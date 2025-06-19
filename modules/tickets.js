@@ -100,7 +100,8 @@ function initializeDatabase() {
       current_category TEXT NOT NULL,
       questions TEXT NOT NULL,
       answers TEXT NOT NULL,
-      active_status TEXT NOT NULL CHECK (active_status IN ('open', 'closed'))
+      active_status TEXT NOT NULL CHECK (active_status IN ('open', 'closed')),
+      assigned TEXT
     );
   `);
 
@@ -298,7 +299,11 @@ module.exports = {
       const staffRoleIds = findStaffRoleIds(config.categories, state.category_path);
       const isStaff = message.member?.roles.cache.some((role) => staffRoleIds.includes(role.id));
       const isCreator = message.author.id === state.creator_id;
-
+      if (state.assigned) {
+        console.log('✅ Assigned:', state.assigned);
+      } else {
+        console.log('❌ Not assigned');
+      }
       // Check if message is from creator or added member to cancel autoclose
       const overwrites = message.channel.permissionOverwrites.cache;
       const isAddedMember = overwrites.some(
@@ -458,8 +463,8 @@ module.exports = {
 
       db.prepare(`
         INSERT INTO tickets (
-          guildid, channelid, creator_id, date_created, category_path, current_category, questions, answers, active_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          guildid, channelid, creator_id, date_created, category_path, current_category, questions, answers, active_status, assigned
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         guild.id,
         channel.id,
@@ -469,7 +474,8 @@ module.exports = {
         JSON.stringify(state.current_category),
         JSON.stringify(state.questions),
         JSON.stringify(state.answers),
-        'open'
+        'open',
+        null
       );
 
       await interaction.reply({
@@ -730,8 +736,8 @@ module.exports = {
 
     db.prepare(`
       INSERT INTO tickets (
-        guildid, channelid, creator_id, date_created, category_path, current_category, questions, answers, active_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        guildid, channelid, creator_id, date_created, category_path, current_category, questions, answers, active_status, assigned
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       guild.id,
       channel.id,
@@ -741,7 +747,8 @@ module.exports = {
       JSON.stringify(state.current_category),
       JSON.stringify(state.questions),
       JSON.stringify(state.answers),
-      'open'
+      'open',
+      null
     );
 
     await interaction.editReply(`🎫 Ticket created: ${channel}`);
