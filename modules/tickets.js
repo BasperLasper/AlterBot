@@ -177,7 +177,37 @@ function parseDuration(durationStr) {
   };
   return value * multipliers[unit];
 }
-
+async function checkAssigned(assigned, message) {
+  const findUser = await resolveMember(message.guild, assigned)
+  let assignedName = findUser.user?.globalName?.toLowerCase() || findUser.user.username
+  if (findUser) {
+    let findAssignedCategory
+      findAssignedCategory = message.guild.channels.cache.find(
+      (ch) => ch.type === 4 && ch.name.toLowerCase() === assignedName
+    );
+    if (!findAssignedCategory) {
+      findAssignedCategory = await message.guild.channels.create({
+        name: assignedName,
+        type: 4, // Category type
+        reason: `Created category for ${assignedName} (ticket assignemnt)`,
+        permissionOverwrites: [
+          {
+            id: message.guild.id, // This is @everyone
+            deny: ['ViewChannel'],
+          },
+        ],
+      });
+    }
+    return findAssignedCategory.id
+  } else return log('user not found')
+}
+async function checkCategoryPermissions(categoryId, message) {
+  const category = await message.guild.channels.fetch(categoryId);
+  const everyoneOverwrite = category.permissionOverwrites.cache.get(message.guild.id);
+  return everyoneOverwrite
+    ? everyoneOverwrite.allow.has(PermissionFlagsBits.ViewChannel)
+    : false;
+}
 function scheduleAutoclose(channel, closeAt, reason, db) {
   if (!botInstance) {
     console.warn(`Cannot schedule autoclose for channel ${channel.id}: botInstance is not defined`);
@@ -251,6 +281,12 @@ module.exports = {
       .addUserOption((opt) =>
         opt.setName('user').setDescription('User to add').setRequired(true)
       ),
+      new SlashCommandBuilder()
+      .setName('assign')
+      .setDescription('Add a user to the current ticket.')
+      .addUserOption((opt) =>
+        opt.setName('user').setDescription('User to add').setRequired(true)
+      ),
     new SlashCommandBuilder()
       .setName('remove')
       .setDescription('Remove a user from the current ticket.')
@@ -258,7 +294,7 @@ module.exports = {
         opt.setName('user').setDescription('User to remove').setRequired(true)
       ),
   ],
-  aliases: ['-new', 'transcript', '-transcript', 'close', '-close', 'createticketmenu', 'autoclose', '-autoclose'],
+  aliases: ['-new', 'transcript', '-transcript', 'close', '-close', 'createticketmenu', 'autoclose', '-autoclose', '-assign'],
   run: async (bot) => {
     botInstance = bot;
     const db = initializeDatabase();
@@ -327,40 +363,10 @@ module.exports = {
       const assignedCategoryId = state.current_category?.categoryId;
       const waitingCategoryId = config.waitingCategoryId;
       const responsedCategoryId = config.responsedCategoryId;
-      async function checkAssigned(assigned) {
-        const findUser = await resolveMember(message.guild, assigned)
-        if (findUser) {
-          let findAssignedCategory
-            findAssignedCategory = message.guild.channels.cache.find(
-            (ch) => ch.type === 4 && ch.name.toLowerCase() === findUser.user.username.toLowerCase()
-          );
-          if (!findAssignedCategory) {
-            findAssignedCategory = message.guild.channels.create({
-              name: findUser.user.username.toLowerCase(),
-              type: 4, // Category type
-              reason: `Created category for ${findUser.user.username.toLowerCase()}`,
-              permissionOverwrites: [
-                {
-                  id: message.guild.id, // This is @everyone
-                  deny: ['ViewChannel'],
-                },
-              ],
-            });
-          }
-          return findAssignedCategory.id
-        } else return log('user not found')
-      }
-      async function checkCategoryPermissions(categoryId) {
-        const category = await message.guild.channels.fetch(categoryId);
-        const everyoneOverwrite = category.permissionOverwrites.cache.get(message.guild.id);
-        return everyoneOverwrite
-          ? everyoneOverwrite.allow.has(PermissionFlagsBits.ViewChannel)
-          : false;
-      }
 
       if (isStaff && responsedCategoryId && currentCategoryId !== responsedCategoryId) {
         try {
-          const canSeeResponsed = await checkCategoryPermissions(responsedCategoryId);
+          const canSeeResponsed = await checkCategoryPermissions(responsedCategoryId, message);
           if (canSeeResponsed) {
             await message.channel.permissionOverwrites.edit(message.guild.id, {
               ViewChannel: false,
@@ -383,7 +389,8 @@ module.exports = {
           console.warn(`❌ Failed to move to Responsed: ${err.message}`);
         }
       }
-      const ticketAssigned = await checkAssigned(state.assigned)
+      let ticketAssigned
+      if (state.assigned) ticketAssigned = await checkAssigned(state.assigned, message)
       if (
         !isStaff &&
         currentCategoryId !== assignedCategoryId &&
@@ -395,7 +402,7 @@ module.exports = {
         if (targetCategoryId) {
           if (state.assigned) targetCategoryId = ticketAssigned
           try {
-            const canSeeTargetCategory = await checkCategoryPermissions(targetCategoryId);
+            const canSeeTargetCategory = await checkCategoryPermissions(targetCategoryId, message);
             if (canSeeTargetCategory) {
               await message.channel.permissionOverwrites.edit(message.guild.id, {
                 ViewChannel: false,
@@ -445,7 +452,6 @@ module.exports = {
       }
     });
 
-    log('Create Ticket Menu loading');
     bot.on('interactionCreate', async (interaction) => {
       if (!interaction.isButton()) return;
       if (interaction.customId !== 'create_ticket') return;
@@ -542,7 +548,74 @@ module.exports = {
         ephemeral: true,
       });
     }
-
+    if (cmd === 'assign' || cmd === '-assign') {
+      const args = interaction.content?.split(' ').slice(1);
+      let userToAdd;
+      if (!args) userToAdd = await interaction?.options?.getUser('user');
+      else userToAdd = await resolveMember(interaction.guild, args.join(' '));
+    
+      if (!userToAdd) {
+        return interaction.reply({
+          content: '❌ Please specify a user to assign this ticket to.',
+          ephemeral: true,
+        });
+      }
+    
+      const channel = interaction.channel;
+      if (!channel.name?.startsWith('ticket-')) {
+        return interaction.reply({
+          content: '❌ This is not a ticket channel.',
+          ephemeral: true,
+        });
+      }
+      const state = db.prepare('SELECT * FROM tickets WHERE channelid = ?').get(channel.id);
+      if (!state) {
+        return interaction.reply({
+          content: '❌ Could not read ticket state.',
+          ephemeral: true,
+        });
+      }
+      db.prepare(`UPDATE tickets SET assigned = ? WHERE channelid = ?`).run(userToAdd.id, channel.id);
+    
+      interaction.reply({
+        content: `This ticket has been assigned to <@${userToAdd.id}>, next message from ticket creator`,
+      });
+    
+      const message = {
+        guild: interaction.guild,
+        channel: interaction.channel,
+        member: interaction.member,
+        author: interaction.user,
+      };
+    
+      let ticketAssigned;
+      try {
+        ticketAssigned = await checkAssigned(state.assigned, message);
+        if (ticketAssigned) {
+          const canSeeTargetCategory = await checkCategoryPermissions(ticketAssigned, message);
+          if (canSeeTargetCategory) {
+            await message.channel.permissionOverwrites.edit(message.guild.id, {
+              ViewChannel: false,
+            });
+            log(`🔒 Denied @everyone permission to view the channel before moving.`);
+          }
+    
+          const channelPermissions = message.channel.permissionOverwrites.cache;
+          await message.channel.setParent(ticketAssigned, { lockPermissions: false });
+          log(`✅ Moved ticket ${message.channel.name} back to ${ticketAssigned}`);
+    
+          for (const [id, overwrite] of channelPermissions.entries()) {
+            try {
+              await message.channel.permissionOverwrites.edit(id, overwrite);
+            } catch (err) {
+              console.warn(`❌ Failed to reapply permission for ${id}: ${err.message}`);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`❌ Failed to move back to original: ${err.message}`);
+      }
+    }
     if (cmd === 'add' || cmd === '-add') {
       const args = interaction.content?.split(' ').slice(1);
       let userToAdd;
@@ -736,7 +809,8 @@ module.exports = {
       },
       {
         id: member.id,
-        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+        allow: [PermissionFlagsBits.ViewChannel],
+        deny: [PermissionFlagsBits.SendMessages]
       },
     ];
 
