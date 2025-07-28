@@ -1,0 +1,80 @@
+{
+  "categories": {
+    "Minecraft Issues": {
+      "categoryId": "721067132766650464",
+      "staffRoleIds": [
+        "721067132011413516",
+        "721067132011413519"
+      ],
+      "children": {
+        "Server Related": {
+          "categoryId": null,
+          "staffRoleIds": [
+            "721067132011413516",
+            "721067132011413519"
+          ],
+          "children": {
+            "Hub": {
+              "categoryId": "721067132766650463",
+              "staffRoleIds": [
+                "721067132011413516",
+                "721067132011413519"
+              ],
+              "questions": [
+                "What issue are you experiencing in Hub?"
+              ]
+            },
+            "Prison": {
+              "categoryId": "721067132766650464",
+              "questions": [
+                "What issue are you experiencing in Prison?"
+              ]
+            },
+            "Buycraft": {
+              "categoryId": "721067132766650462",
+              "questions": [
+                "What issue are you experiencing in tebex?"
+              ]
+            }
+          }
+        },
+        "Client Related": {
+          "categoryId": null,
+          "questions": [
+            "What client are you using?",
+            "What mods are installed?"
+          ]
+        }
+      }
+    }
+  },
+  "staffCategoriesParentId": "721067132766650459",
+  "selectMenuTimeout": "600000",
+  "questionsTimeout": "1800000", 
+  "waitingCategoryId": "721067132766650465",
+  "responsedCategoryId": "1384527802077810758",
+  "transcripts": {
+    "enabled": true,
+    "channelId": "721067132766650460",
+    "dmCreator": true,
+    "dmCloser": true,
+    "commandsEnabled": true,
+    "transcriptRoles": [
+      "721067132011413516",
+      "721067131906818101"
+    ],
+    "closingRoles": [
+      "721067132011413516",
+      "721067131906818101"
+    ],
+    "mentionRoles": [
+      "721067132011413517",
+      "721067132011413515",
+      "721067132011413519",
+      "721067132011413520",
+      "721067132011413521"
+    ],
+"uploadURL": "http://panel.alterhaven.com:3001/upload",
+      "publicURLPrefix": "http://alterhaven.com"
+  }
+}

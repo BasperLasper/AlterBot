@@ -1,0 +1,17 @@
+{
+  "roles": {
+    "721067132011413516": {
+      "statuses": [
+        "gta v",
+        "grand theft auto v"
+      ],
+      "autoRemove": true
+    },
+    "721067132003025018": {
+      "statuses": [
+        "jeśli wrócisz nigdy więcej tak nie będzie"
+      ],
+      "autoRemove": false
+    }
+  }
+}
