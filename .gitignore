@@ -1,16 +1,24 @@
-config.json
+# Ignore the database
 */tickets.db
+
+# Ignore all node_modules folders
 node_modules/
 **/node_modules/
+
+# Ignore logs
 logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Ignore PID files
 pids
 *.pid
 *.seed
 *.pid.lock
+
+# Ignore coverage, temp files
 lib-cov
 coverage
 .npm
@@ -23,6 +31,6 @@ build/
 tmp/
 temp/
 push.sh
-transcripts-web/nodejs/public/transcripts/*
-**/transcripts-web/nodejs/public/transcripts/
+modules/*
+transcripts-web/
 modules_configs/Tickets/Data/*
