@@ -34,3 +34,4 @@ push.sh
 modules/*
 transcripts-web/
 modules_configs/Tickets/Data/*
+./config.json
