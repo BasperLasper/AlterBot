@@ -1,0 +1,10 @@
+mode: scroll
+typeString: Playing
+message:
+    - BBB
+    - Github
+    - Basper
+    - Flights
+status: null
+interval: 10
+currentIndex: 24633
