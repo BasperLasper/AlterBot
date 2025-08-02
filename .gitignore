@@ -33,6 +33,6 @@ temp/
 push.sh
 modules/*
 transcripts-web/
-modules_configs/Tickets/Data/*
+modules_configs/*
 ./config.json
 config.json
