@@ -31,7 +31,6 @@ build/
 tmp/
 temp/
 push.sh
-modules/claimrole.js
 modules/eval.js
 modules/reloadCommands.js
 modules/roleMenu.js
