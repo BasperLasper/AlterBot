@@ -31,6 +31,10 @@ build/
 tmp/
 temp/
 push.sh
-modules/*
+modules/claimrole.js
+modules/eval.js
+modules/reloadCommands.js
+modules/roleMenu.js
+modules/tickets.js
 transcripts-web/
 modules_configs/Tickets/Data/*
