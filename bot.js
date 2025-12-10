@@ -6,7 +6,7 @@ const readline = require('readline');
 
 const configPath = path.resolve(__dirname, 'config.json');
 if (!fs.existsSync(configPath)) {
-  const defaultConfig = { token: '', clientId: '', guildId: '' };
+  const defaultConfig = { token: '', clientId: '', };
   fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
   console.log('config.json not found. Created default config.json. Please fill it in and restart the bot.');
   console.log('Process exiting...');

@@ -1,4 +1,4 @@
-const Discord = require('discord.js');
+const { EmbedBuilder } = require('discord.js');
 
 function replacePlaceholders(text, replacements = {}) {
   if (typeof text !== 'string') return text;
@@ -10,7 +10,7 @@ function replacePlaceholders(text, replacements = {}) {
 }
 
 function buildEmbed(embedData, replacements = {}) {
-  const embed = new Discord.EmbedBuilder();
+  const embed = new EmbedBuilder();
 
   if (embedData.title) embed.setTitle(replacePlaceholders(embedData.title, replacements));
   if (embedData.description) embed.setDescription(replacePlaceholders(embedData.description, replacements));
@@ -21,27 +21,32 @@ function buildEmbed(embedData, replacements = {}) {
   if (embedData.author) {
     embed.setAuthor({
       name: replacePlaceholders(embedData.author.name, replacements),
-      url: embedData.author.url || null,
-      iconURL: embedData.author.icon_url || null,
+      url: embedData.author.url || undefined,
+      iconURL: embedData.author.icon_url || undefined,
     });
   }
 
-  if (embedData.thumbnail) embed.setThumbnail(embedData.thumbnail.url);
-  if (embedData.image) embed.setImage(embedData.image.url);
+  if (embedData.thumbnail?.url) {
+    embed.setThumbnail(embedData.thumbnail.url);
+  }
+
+  if (embedData.image?.url) {
+    embed.setImage(embedData.image.url);
+  }
 
   if (embedData.footer) {
     embed.setFooter({
       text: replacePlaceholders(embedData.footer.text, replacements),
-      iconURL: embedData.footer.icon_url || null,
+      iconURL: embedData.footer.icon_url || undefined,
     });
   }
 
-  if (embedData.fields) {
+  if (Array.isArray(embedData.fields)) {
     embed.addFields(
       embedData.fields.map(field => ({
         name: replacePlaceholders(field.name, replacements),
         value: replacePlaceholders(field.value, replacements),
-        inline: field.inline || false,
+        inline: field.inline ?? false,
       }))
     );
   }
@@ -49,15 +54,17 @@ function buildEmbed(embedData, replacements = {}) {
   return embed;
 }
 
-async function sendEmbeds(target, embedsArray, reply = false) {
-  // embedsArray = array of embed JS objects already built
+async function sendEmbeds(target, embedConfig, replacements = {}, reply = false) {
+  const embeds = Array.isArray(embedConfig)
+    ? embedConfig.map(embedData => buildEmbed(embedData, replacements))
+    : [buildEmbed(embedConfig, replacements)];
+
   if ('reply' in target && reply) {
-    await target.reply({ embeds: embedsArray });
+    await target.reply({ embeds });
   } else if ('channel' in target) {
-    await target.channel.send({ embeds: embedsArray });
+    await target.channel.send({ embeds });
   } else {
-    // fallback: if target is a channel-like object
-    await target.send({ embeds: embedsArray });
+    await target.send({ embeds });
   }
 }
 

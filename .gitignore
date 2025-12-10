@@ -35,4 +35,6 @@ modules/eval.js
 modules/reloadCommands.js
 modules/roleMenu.js
 transcripts-web/
-modules_configs/Tickets/Data/*
+modules_configs/*
+./config.json
+config.json

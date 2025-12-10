@@ -3,7 +3,7 @@
 AlterBot is an **open-source, modular Discord bot** built using [Discord.js](https://discord.js.org). Designed to be simple, flexible, and extendable with minimal effort — perfect for community servers, developer learning, or adding your own features quickly.
 
 ---
-
+### [Support via Discord.gg/QHUYw2wGrc](https://discord.gg/QHUYw2wGrc)
 ## 🔧 Features
 
 - 🔌 Modular command system (/modules)
